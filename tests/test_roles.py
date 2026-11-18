@@ -52,7 +52,7 @@ def test_reader_can_select_every_table(connect_as: ConnectAs, table: str) -> Non
 @pytest.mark.parametrize(
     "statement",
     [
-        "INSERT INTO nba.teams VALUES (99, 'XXX', 'Fake Team')",
+        "INSERT INTO nba.teams VALUES (99, 'XXX', 'Fake Team', '2026-10-20')",
         "UPDATE nba.meta SET data_version = 999",
         "DELETE FROM nba.meta",
         "TRUNCATE nba.meta",
@@ -78,7 +78,7 @@ def test_reader_cannot_read_migration_tracking(connect_as: ConnectAs) -> None:
 
 def test_ingest_can_write_rows(connect_as: ConnectAs) -> None:
     ingest = connect_as("nba_ingest")
-    ingest.execute("INSERT INTO nba.teams VALUES (1, 'OKC', 'Oklahoma City Thunder')")
+    ingest.execute("INSERT INTO nba.teams VALUES (1, 'OKC', 'Oklahoma City Thunder', '2026-10-20')")
     ingest.execute("UPDATE nba.meta SET data_version = data_version + 1")
     assert ingest.execute("SELECT data_version FROM nba.meta").fetchone() == (1,)
 

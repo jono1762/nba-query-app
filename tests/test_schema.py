@@ -15,9 +15,9 @@ def migrated(db: psycopg.Connection) -> psycopg.Connection:
 
 
 def insert_sample_game(conn: psycopg.Connection) -> None:
-    conn.execute("INSERT INTO nba.teams VALUES (1, 'OKC', 'Oklahoma City Thunder')")
-    conn.execute("INSERT INTO nba.teams VALUES (2, 'SAS', 'San Antonio Spurs')")
-    conn.execute("INSERT INTO nba.players VALUES (10, 'Jaylin Williams')")
+    conn.execute("INSERT INTO nba.teams VALUES (1, 'OKC', 'Oklahoma City Thunder', '2026-10-20')")
+    conn.execute("INSERT INTO nba.teams VALUES (2, 'SAS', 'San Antonio Spurs', '2026-10-20')")
+    conn.execute("INSERT INTO nba.players VALUES (10, 'Jaylin Williams', '2026-10-20')")
     conn.execute(
         "INSERT INTO nba.games VALUES "
         "('0022600003', '2026-10-20', '2026-27', 'Regular Season', 2, 1)"
