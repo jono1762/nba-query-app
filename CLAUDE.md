@@ -89,3 +89,13 @@ Consequences of this setup:
 - The user reviews every change **commit by commit** in VS Code's Source Control Graph. Work on one branch per feature or phase, with small focused commits, each passing lint and tests on its own.
 - Push the branch and open a PR (`gh pr create`) so CI runs **before** asking for review. After approval, merge with `gh pr merge --merge --delete-branch`, pull `main`, and confirm CI passes on `main`.
 - Explain things in plain language and define infrastructure, AWS and database jargon. The user isn't familiar with many of these terms.
+- **Keep docs and comments in sync with the code, in the same commit as the change that affects them.** That covers:
+  - `README.md` (commands, layout)
+  - `docs/PLAN.md` (progress table, changed decisions)
+  - this file (commands, architecture, constraints)
+  - `spikes/FINDINGS.md`
+  - module and function docstrings
+  - inline comments
+  - SQL column `COMMENT`s, which are fed to the LLM
+
+  A stale comment is a bug, so fix it when you see one. Before asking for review, check that nothing in the diff contradicts these files.
