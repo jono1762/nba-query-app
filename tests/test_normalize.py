@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from nba_query.ingest.normalize import (
+from nba_query_app.ingest.normalize import (
     NormalizeError,
     normalize_league_game_log,
     parse_is_home,

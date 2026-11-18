@@ -9,8 +9,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from nba_query.ingest.load import load_batch
-from nba_query.ingest.normalize import Batch, normalize_league_game_log
+from nba_query_app.ingest.load import load_batch
+from nba_query_app.ingest.normalize import Batch, normalize_league_game_log
 
 FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games.json"
 BOS = 1610612738

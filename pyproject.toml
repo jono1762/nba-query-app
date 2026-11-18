@@ -1,5 +1,5 @@
 [project]
-name = "nba-query"
+name = "nba-query-app"
 version = "0.1.0"
 description = "Ask NBA player stat questions in plain English; answers come from SQL over real data."
 readme = "README.md"
@@ -19,7 +19,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nba_query"]
+packages = ["src/nba_query_app"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -16,7 +16,7 @@ import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
-from nba_query.db.migrate import apply_migrations
+from nba_query_app.db.migrate import apply_migrations
 
 
 @pytest.fixture

@@ -12,7 +12,7 @@ from dataclasses import astuple, dataclass, fields
 import psycopg
 from psycopg import sql
 
-from nba_query.ingest.normalize import Batch, Game, Player, PlayerGameStats, Team
+from nba_query_app.ingest.normalize import Batch, Game, Player, PlayerGameStats, Team
 
 
 @dataclass(frozen=True)

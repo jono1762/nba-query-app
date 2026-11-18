@@ -3,7 +3,7 @@
 import psycopg
 import pytest
 
-from nba_query.db.migrate import apply_migrations
+from nba_query_app.db.migrate import apply_migrations
 
 EXPECTED_TABLES = {"teams", "players", "games", "player_game_stats", "meta"}
 
