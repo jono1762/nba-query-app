@@ -8,6 +8,28 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+
+    # A throwaway Postgres for the database tests, same version as docker-compose.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nba
+          POSTGRES_PASSWORD: nba_ci
+          POSTGRES_DB: nba
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nba -d nba"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      DATABASE_URL: postgresql://nba:nba_ci@localhost:5432/nba
+      # In CI, database tests must run, never silently skip.
+      REQUIRE_DATABASE: "1"
+
     steps:
       - uses: actions/checkout@v4
 

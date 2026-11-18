@@ -3,7 +3,8 @@
 Database tests need a Postgres server (locally: `docker compose up -d`) and the
 DATABASE_URL environment variable. Each test gets its own brand-new, empty
 database, which is deleted afterwards, so tests never see each other's data or
-touch the development database. Without DATABASE_URL, database tests are skipped.
+touch the development database. Without DATABASE_URL, database tests are skipped,
+unless REQUIRE_DATABASE is set (as in CI), in which case they fail.
 """
 
 import os
@@ -20,6 +21,8 @@ from psycopg.conninfo import make_conninfo
 def server_url() -> str:
     url = os.environ.get("DATABASE_URL")
     if not url:
+        if os.environ.get("REQUIRE_DATABASE"):
+            pytest.fail("REQUIRE_DATABASE is set but DATABASE_URL is missing")
         pytest.skip("DATABASE_URL not set; skipping database test")
     return url
 
