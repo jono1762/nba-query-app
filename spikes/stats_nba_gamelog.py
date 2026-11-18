@@ -53,7 +53,7 @@ def main() -> None:
     print(f"Columns ({len(headers)}): {', '.join(headers)}")
     if rows:
         print("Sample row:")
-        for header, value in zip(headers, rows[0]):
+        for header, value in zip(headers, rows[0], strict=True):
             print(f"  {header:<18} {value!r}")
 
     OUTPUT_DIR.mkdir(exist_ok=True)

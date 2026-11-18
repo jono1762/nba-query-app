@@ -1,0 +1,20 @@
+# Local development database. Start with: docker compose up -d
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nba}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nba_local_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-nba}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nba} -d ${POSTGRES_DB:-nba}"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+volumes:
+  pgdata:
