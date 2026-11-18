@@ -9,12 +9,14 @@ unless REQUIRE_DATABASE is set (as in CI), in which case they fail.
 
 import os
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import psycopg
 import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
+
+from nba_query.db.migrate import apply_migrations
 
 
 @pytest.fixture
@@ -45,3 +47,31 @@ def db(test_db_url: str) -> Iterator[psycopg.Connection]:
     """An autocommit connection to the throwaway database, as the admin user."""
     with psycopg.connect(test_db_url, autocommit=True) as conn:
         yield conn
+
+
+@pytest.fixture
+def connect_as(
+    db: psycopg.Connection, test_db_url: str
+) -> Iterator[Callable[[str], psycopg.Connection]]:
+    """Returns a function that connects to the test database as a member of a role."""
+    apply_migrations(db)
+    created: list[tuple[str, psycopg.Connection]] = []
+
+    def _connect(role: str) -> psycopg.Connection:
+        user = f"test_{role}_{uuid.uuid4().hex[:8]}"
+        password = uuid.uuid4().hex
+        db.execute(
+            sql.SQL("CREATE ROLE {} LOGIN PASSWORD {} IN ROLE {}").format(
+                sql.Identifier(user), sql.Literal(password), sql.Identifier(role)
+            )
+        )
+        conn = psycopg.connect(make_conninfo(test_db_url, user=user, password=password))
+        conn.autocommit = True
+        created.append((user, conn))
+        return conn
+
+    yield _connect
+
+    for user, conn in created:
+        conn.close()
+        db.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(user)))
