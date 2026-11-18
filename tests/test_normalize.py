@@ -150,3 +150,39 @@ def test_bad_win_loss_is_an_error(response: dict) -> None:
     set_column(response, "WL", None)
     with pytest.raises(NormalizeError, match="WL"):
         normalize_league_game_log(response)
+
+
+def set_matchups(response: dict, game_id: str, matchup_by_team: dict[int, str]) -> None:
+    headers = response["resultSets"][0]["headers"]
+    for row in response["resultSets"][0]["rowSet"]:
+        if row[headers.index("GAME_ID")] == game_id:
+            row[headers.index("MATCHUP")] = matchup_by_team[row[headers.index("TEAM_ID")]]
+
+
+def test_both_teams_away_means_neutral_site(response: dict) -> None:
+    # Real example: 0022600189 lists 'IND @ DEN' and 'DEN @ IND'.
+    set_matchups(response, "0022600001", {BOS: "BOS @ DET", DET: "DET @ BOS"})
+    batch = normalize_league_game_log(response)
+
+    game = next(g for g in batch.games if g.game_id == "0022600001")
+    assert game.neutral_site is True
+    assert (game.home_team_id, game.away_team_id) == (None, None)
+    rows = [s for s in batch.stats if s.game_id == "0022600001"]
+    assert all(s.is_home is None for s in rows)
+    assert {s.opponent_team_id for s in rows if s.team_id == BOS} == {DET}
+
+
+def test_normal_games_are_not_neutral(response: dict) -> None:
+    assert not any(g.neutral_site for g in normalize_league_game_log(response).games)
+
+
+def test_both_teams_home_is_an_error(response: dict) -> None:
+    set_matchups(response, "0022600001", {BOS: "BOS vs. DET", DET: "DET vs. BOS"})
+    with pytest.raises(NormalizeError, match="Both teams"):
+        normalize_league_game_log(response)
+
+
+def test_one_team_listed_both_home_and_away_is_an_error(response: dict) -> None:
+    set_column(response, "MATCHUP", "PHI vs. NYK", row_index=0)  # row 0 is PHI, really away
+    with pytest.raises(NormalizeError, match="home/away"):
+        normalize_league_game_log(response)

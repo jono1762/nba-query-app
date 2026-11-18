@@ -41,8 +41,9 @@ class Game:
     game_date: date
     season: str
     season_type: str
-    home_team_id: int
-    away_team_id: int
+    home_team_id: int | None  # None at a neutral site
+    away_team_id: int | None
+    neutral_site: bool
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ class PlayerGameStats:
     team_id: int
     team_abbreviation: str
     opponent_team_id: int
-    is_home: bool
+    is_home: bool | None  # None at a neutral site
     won: bool
     minutes: int
     pts: int
@@ -132,12 +133,7 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
     headers: list[str] = result["headers"]
     raw_rows = [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
 
-    teams_by_game: dict[str, set[int]] = {}
-    for row in raw_rows:
-        teams_by_game.setdefault(row["GAME_ID"], set()).add(row["TEAM_ID"])
-    for game_id, team_ids in teams_by_game.items():
-        if len(team_ids) != 2:
-            raise NormalizeError(f"Game {game_id} has {len(team_ids)} teams, expected 2")
+    home_away = _home_and_away_by_game(raw_rows)
 
     teams: dict[int, Team] = {}
     players: dict[int, Player] = {}
@@ -149,8 +145,9 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
         game_date = date.fromisoformat(row["GAME_DATE"])
         season, season_type = season_from_id(row["SEASON_ID"])
         team_id = row["TEAM_ID"]
-        (opponent_id,) = teams_by_game[game_id] - {team_id}
-        is_home = parse_is_home(row["MATCHUP"])
+        home_id, away_id, opponent_of = home_away[game_id]
+        opponent_id = opponent_of[team_id]
+        is_home = None if home_id is None else team_id == home_id
 
         _keep_latest(
             teams, team_id, Team(team_id, row["TEAM_ABBREVIATION"], row["TEAM_NAME"], game_date)
@@ -164,11 +161,12 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
             game_date=game_date,
             season=season,
             season_type=season_type,
-            home_team_id=team_id if is_home else opponent_id,
-            away_team_id=opponent_id if is_home else team_id,
+            home_team_id=home_id,
+            away_team_id=away_id,
+            neutral_site=home_id is None,
         )
         if games.setdefault(game_id, game) != game:
-            raise NormalizeError(f"Rows for game {game_id} disagree about date/season/home team")
+            raise NormalizeError(f"Rows for game {game_id} disagree about date or season")
 
         counting = {}
         for column, source in COUNTING_STATS.items():
@@ -197,6 +195,36 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
         games=list(games.values()),
         stats=stats,
     )
+
+
+def _home_and_away_by_game(
+    raw_rows: list[dict[str, Any]],
+) -> dict[str, tuple[int | None, int | None, dict[int, int]]]:
+    """For each game: (home team, away team, {team: its opponent}).
+
+    Home and away are None for neutral-site games, where both teams are listed as away.
+    """
+    is_home_by_game: dict[str, dict[int, bool]] = {}
+    for row in raw_rows:
+        flags = is_home_by_game.setdefault(row["GAME_ID"], {})
+        is_home = parse_is_home(row["MATCHUP"])
+        if flags.setdefault(row["TEAM_ID"], is_home) != is_home:
+            raise NormalizeError(f"Rows for game {row['GAME_ID']} disagree about home/away")
+
+    result = {}
+    for game_id, flags in is_home_by_game.items():
+        if len(flags) != 2:
+            raise NormalizeError(f"Game {game_id} has {len(flags)} teams, expected 2")
+        (team_a, a_home), (team_b, b_home) = flags.items()
+        opponent_of = {team_a: team_b, team_b: team_a}
+        if a_home != b_home:
+            home, away = (team_a, team_b) if a_home else (team_b, team_a)
+            result[game_id] = (home, away, opponent_of)
+        elif not a_home:
+            result[game_id] = (None, None, opponent_of)  # neutral site
+        else:
+            raise NormalizeError(f"Both teams are listed as home in game {game_id}")
+    return result
 
 
 def _keep_latest(found: dict, key: int, candidate: Team | Player) -> None:
