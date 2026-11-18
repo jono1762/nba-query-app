@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from nba_query.seasons import season_for_date
+from nba_query_app.seasons import season_for_date
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-# NBA Stats Q&A
+# NBA Query App
 
 Ask questions about NBA player stats in plain English. An LLM turns the question
 into SQL, the SQL is safety-checked and run against a Postgres database of real
@@ -14,7 +14,7 @@ Requirements: [uv](https://docs.astral.sh/uv/) and Docker.
 uv sync                      # create .venv and install dependencies
 cp .env.example .env         # local settings (git-ignored)
 docker compose up -d         # start local Postgres on localhost:5432
-uv run --env-file .env python -m nba_query.db.migrate   # create/update tables
+uv run --env-file .env python -m nba_query_app.db.migrate   # create/update tables
 
 uv run ruff check .                  # lint
 uv run ruff format .                 # auto-format
@@ -35,7 +35,7 @@ uv run --env-file .env pytest        # all tests (database tests need Postgres r
 ## Project layout
 
 ```
-src/nba_query/   application code
+src/nba_query_app/   application code
 migrations/      database schema changes (numbered SQL files)
 tests/           automated tests
 spikes/          throwaway experiments and their findings (see spikes/FINDINGS.md)

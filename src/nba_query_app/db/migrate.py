@@ -6,7 +6,7 @@ failing file leaves the database unchanged. Applied files are recorded in the
 `public.schema_migrations` table and skipped on later runs.
 
 Usage:
-    uv run --env-file .env python -m nba_query.db.migrate
+    uv run --env-file .env python -m nba_query_app.db.migrate
 """
 
 import os

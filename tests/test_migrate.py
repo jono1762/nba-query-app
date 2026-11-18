@@ -3,7 +3,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from nba_query.db.migrate import apply_migrations
+from nba_query_app.db.migrate import apply_migrations
 
 
 def write(directory: Path, name: str, content: str) -> None:
