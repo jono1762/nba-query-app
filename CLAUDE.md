@@ -18,7 +18,7 @@ Not built yet:
 - API and frontend
 - AWS deploy
 
-The phased plan lives outside the repo at `~/.claude/plans/pasted-content-id-0ccc-project-nba-dynamic-flask.md`.
+The phased plan, with decisions, trade-offs and a progress table, is in `docs/PLAN.md`. Update its progress table and any changed decisions in the same branch as the work.
 
 ## Commands
 
@@ -79,6 +79,7 @@ Consequences of this setup:
 ## Constraints to keep in mind
 
 - **stats.nba.com blocks cloud IPs**, so ingestion runs from a home machine. cdn.nba.com returned 403 even from home and was dropped. The daily update will be a local scheduled job that re-fetches the current season (one request), relying on idempotent upserts.
+- **Data goes into the local Docker database for now.** Neon is set up and loaded in Phase 8.
 - **The Gemini free tier has tight per-minute and daily limits.** Tests must never call the real LLM, so use stubs. The accuracy eval runs only when triggered by hand.
 - **The LLM doesn't know today's date.** Always pass the current date, the current season and `nba.meta.latest_game_date` into the prompt.
 - **GitHub Actions:** `astral-sh/setup-uv` no longer publishes moving major tags, so pin an exact version (e.g. `@v10.3.3`). CI runs only on pushes to `main` and on pull requests.
