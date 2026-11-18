@@ -31,5 +31,9 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
 
 ## What this means for the plan
 - The history download (Phase 2) works as planned.
-- The daily update (Phase 9) can't count on cdn.nba.com. Options are still to be
-  decided.
+- **Decision (2026-11-18): use stats.nba.com only.** It handles both the history
+  download and the daily update. The daily update runs as a scheduled task on a
+  home machine instead of in AWS. Each run fetches the whole current season in
+  one request and adds only new rows, so missed days catch up on their own.
+- cdn.nba.com is dropped. If a fully cloud-based update is wanted later, test
+  `cdn_boxscore.py` from AWS first. It's kept here as a record of this test.
