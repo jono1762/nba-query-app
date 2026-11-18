@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Ask NBA player stat questions in plain English; answers come from SQL over real data."
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "psycopg[binary]>=3.2",
+]
 
 [dependency-groups]
 dev = [

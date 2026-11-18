@@ -14,16 +14,29 @@ Requirements: [uv](https://docs.astral.sh/uv/) and Docker.
 uv sync                      # create .venv and install dependencies
 cp .env.example .env         # local settings (git-ignored)
 docker compose up -d         # start local Postgres on localhost:5432
+uv run --env-file .env python -m nba_query.db.migrate   # create/update tables
 
-uv run ruff check .          # lint
-uv run ruff format .         # auto-format
-uv run pytest                # tests
+uv run ruff check .                  # lint
+uv run ruff format .                 # auto-format
+uv run --env-file .env pytest        # all tests (database tests need Postgres running)
 ```
+
+## Database
+
+- `migrations/` holds numbered SQL files, applied in order, once each.
+- `nba` schema: `teams`, `players`, `games`, `player_game_stats` (one row per
+  player per game), and `meta` (data version and newest game date).
+- Roles (permission groups, no passwords):
+  - `nba_reader`: read-only. All LLM-written SQL runs as a member of this role.
+  - `nba_ingest`: can load data, but not change table structure.
+
+  Each environment creates its own login users and grants them one of these.
 
 ## Project layout
 
 ```
 src/nba_query/   application code
+migrations/      database schema changes (numbered SQL files)
 tests/           automated tests
 spikes/          throwaway experiments and their findings (see spikes/FINDINGS.md)
 ```
