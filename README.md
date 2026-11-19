@@ -35,8 +35,9 @@ uv run --env-file .env pytest        # all tests (database tests need Postgres r
 ## Project layout
 
 ```
-src/nba_query_app/   application code
-migrations/      database schema changes (numbered SQL files)
-tests/           automated tests
-spikes/          throwaway experiments and their findings (see spikes/FINDINGS.md)
+src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading)
+migrations/          database schema changes (numbered SQL files)
+tests/               automated tests
+docs/PLAN.md         the build plan, decisions and progress
+spikes/              throwaway experiments and their findings (see spikes/FINDINGS.md)
 ```
