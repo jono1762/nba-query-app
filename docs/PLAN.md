@@ -120,7 +120,15 @@ On your laptop:
 **Phase 2: Load the data**
 - 2a: Convert NBA's data into our tables; loading twice changes nothing. Handles neutral-site games and team renames. Done.
 - 2b: History download command for every season from 1946-47 (regular season, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens when we deploy (Phase 8).
-- 2c: Season-totals view, and spot-checks against well-known real numbers. Also work out from the data when each stat became fully recorded (e.g. blocks from 1973-74) and store that in a small table, for the AI's "tracked since" rules.
+- 2c: Season totals and data quality.
+  - Season-totals view, and spot-checks against well-known real numbers.
+  - **"Tracked since" table**, calculated from the data rather than typed-in dates (e.g. "first season where ≥ 99% of rows have blocks"). It drives the AI's refuse-or-caveat rules. Coverage ramps up gradually and unevenly, so these are *not* hard database rules.
+  - **Data-quality checks** (a script that runs after loading, plus tests). They report violations for a person to look at; they don't block the load. They flag:
+    - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
+    - *Stats that disappear* after being fully recorded.
+    - *Implausible numbers:* a player's points ≠ 2×FGM + FG3M + FTM where all are recorded, extreme single-game values.
+    - *Team totals that don't add up* within a game.
+  - If a check finds something, look at the actual rows and decide, as with the old box-score errors in Phase 2b.
 
 **Phase 3: Safety checker (no AI yet)**
 - The SQL checker, with many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
@@ -148,6 +156,9 @@ On your laptop:
 **Phase 10: Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
 
 ---
+
+## Possible extras (not planned)
+- **All-Star games.** Available from 1950-51 under made-up "East/West All Stars" teams, but missing for the new format (2024-25 on). Left out because it's an exhibition that every normal question must exclude: mixing it in risks inflated totals. If added, it goes in its **own table**, and recent games need another source.
 
 ## Trade-offs
 - **One database for everything.** Rate limits, cache and logs go in the same Postgres as the stats: simpler. Downside: even a cached answer wakes Neon, which takes under a second.
