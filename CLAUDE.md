@@ -9,7 +9,7 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, play-in and playoffs, about 1.49M rows and 305 MB.
+- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB.
 
 Not built yet:
 - SQL safety checker
@@ -32,7 +32,7 @@ uv run ruff check . && uv run ruff format --check .    # lint + format check (CI
 uv run --env-file .env pytest                          # all tests
 uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated   # one test
 
-uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|play-in|playoffs|all]
+uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
 ```
 
 The backfill makes real requests to stats.nba.com (about 170 for the full history, roughly 5 minutes). Run it only when data is actually needed.
@@ -58,7 +58,10 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Team and player names are updated only when `name_as_of` is the same date or newer, so loading an old season can't overwrite a current name.
 
 **Data quirks handled in `normalize.py`** (details in `spikes/FINDINGS.md`):
-- `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in; anything else is rejected), then the start year. It becomes `'2026-27'`. The API calls play-in `PlayIn`, which we store as `Play-In` (from 2019-20).
+- **Official, competitive games only** (a deliberate product decision, see `docs/PLAN.md`): exhibitions such as the All-Star game and preseason are excluded.
+- `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in, 6 = NBA Cup final; anything else, including 1 = preseason and 3 = All-Star, is rejected), then the start year. It becomes `'2026-27'`.
+  - The API calls play-in `PlayIn` (from 2019-20); we store it as `Play-In`.
+  - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. `fetch.py` keeps only the prefix-6 final, because the other Cup games are regular-season games we already have.
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.

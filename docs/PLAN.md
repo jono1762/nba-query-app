@@ -10,7 +10,7 @@ A website where someone types a question like *"Who scored the most points in Ma
 3. The website shows the answer, taken from the actual data and not from the AI's memory.
 
 Decisions:
-- **Data:** every player's stats for every game (regular season, play-in and playoffs), plus season totals, for the **full history from 1946-47** to today. Source: stats.nba.com only. Stats that weren't recorded in early seasons are stored as "not recorded" (NULL), and the AI must refuse or caveat questions about them.
+- **Data:** every player's stats for every **official, competitive game**, plus season totals, for the **full history from 1946-47** to today. That means regular season, NBA Cup final (from 2023-24), play-in (from 2019-20) and playoffs. Exhibitions (All-Star, Rising Stars, preseason) are excluded by design. Source: stats.nba.com only. Stats that weren't recorded in early seasons are stored as "not recorded" (NULL), and the AI must refuse or caveat questions about them.
 - **AWS setup tool:** AWS SAM.
 - **Frontend:** a plain webpage with no framework.
 - **Access:** anyone can use it, with a limit on how often each visitor can ask.
@@ -26,7 +26,7 @@ Decisions:
 | 1a | Project skeleton, lint, tests, Docker Postgres, CI | Done |
 | 1b | Tables and database roles | Done |
 | 2a | Convert NBA data into table rows; idempotent loader | Done |
-| 2b | Full history download (1946-47 on, plus play-in), into the **local database first** | Done: 1.49M rows, 305 MB |
+| 2b | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 2c | Season-totals view and spot-checks | Next |
 | 3 | SQL safety checker | |
 | 4 | Connect Gemini | |
@@ -119,7 +119,7 @@ On your laptop:
 
 **Phase 2: Load the data**
 - 2a: Convert NBA's data into our tables; loading twice changes nothing. Handles neutral-site games and team renames. Done.
-- 2b: History download command for every season from 1946-47 (regular season, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens when we deploy (Phase 8).
+- 2b: History download command for every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens when we deploy (Phase 8).
 - 2c: Season totals and data quality.
   - Season-totals view, and spot-checks against well-known real numbers.
   - **"Tracked since" table**, calculated from the data rather than typed-in dates (e.g. "first season where ≥ 99% of rows have blocks"). It drives the AI's refuse-or-caveat rules. Coverage ramps up gradually and unevenly, so these are *not* hard database rules.
@@ -157,8 +157,8 @@ On your laptop:
 
 ---
 
-## Possible extras (not planned)
-- **All-Star games.** Available from 1950-51 under made-up "East/West All Stars" teams, but missing for the new format (2024-25 on). Left out because it's an exhibition that every normal question must exclude: mixing it in risks inflated totals. If added, it goes in its **own table**, and recent games need another source.
+## Which games count
+**Official, competitive games only:** regular season, NBA Cup final, play-in and playoffs. Exhibitions are excluded, including the All-Star game, Rising Stars and preseason. They don't count in official stats, so mixing them in would inflate totals and every question would have to filter them out. The All-Star game was also checked: the source has it from 1950-51 to 2023-24 but can't reliably identify the new-format games from 2024-25 on.
 
 ## Trade-offs
 - **One database for everything.** Rate limits, cache and logs go in the same Postgres as the stats: simpler. Downside: even a cached answer wakes Neon, which takes under a second.

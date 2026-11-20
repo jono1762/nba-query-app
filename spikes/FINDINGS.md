@@ -106,3 +106,28 @@ games. The 2000-01 to now load above was the first step.
 - **Neutral-site games:** still 11, all from 2024-25 on. Earlier neutral-venue
   games, common in the 1950s-60s, are listed with a normal home team in the
   source, so they aren't flagged.
+
+## Which games are included (2026-11-20)
+Decision: **official, competitive games only.**
+- **Included:**
+  - regular season
+  - NBA Cup final (from 2023-24)
+  - play-in (from 2019-20)
+  - playoffs
+- **Excluded:** exhibitions (All-Star, Rising Stars, preseason).
+
+- **NBA Cup:** the source's "IST" season type returns all 67 Cup games per season.
+  - 66 are regular-season games, which the regular-season download already has
+    (2024-25 has exactly 30 × 82 ÷ 2 = 1,230 regular-season games).
+  - The championship game has season-ID prefix 6 and doesn't count in
+    regular-season stats, so it was missing. The 3 finals are now loaded as
+    `NBA Cup Final`:
+    - 2023 LAL over IND (the source lists it as a LAL home game)
+    - 2024 MIL over OKC (neutral site)
+    - 2025 NYK over SAS (neutral site)
+- **All-Star game,** checked and excluded:
+  - The source has it from 1950-51 to 2023-24, under made-up "East/West All
+    Stars" teams.
+  - For the new format (2024-25 on), the `003…` game IDs mix the All-Star games
+    with Rising Stars games, and some return nothing, so the real All-Star games
+    can't be identified reliably.
