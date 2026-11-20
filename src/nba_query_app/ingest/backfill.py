@@ -30,8 +30,10 @@ from nba_query_app.seasons import season_for_date, season_start_year, seasons_be
 
 FIRST_SEASON = "1946-47"  # the first BAA season; the BAA became the NBA in 1949
 PLAY_IN_FIRST_SEASON = "2019-20"
+CUP_FINAL_FIRST_SEASON = "2023-24"
 SEASON_TYPE_CHOICES = {
     "regular": ("Regular Season",),
+    "cup-final": ("NBA Cup Final",),
     "play-in": ("Play-In",),
     "playoffs": ("Playoffs",),
     "all": SEASON_TYPES,
@@ -58,14 +60,15 @@ def backfill(
 ) -> list[SeasonResult]:
     """Fetch, convert and load each season/type in turn, pausing between requests.
 
-    Play-in is skipped for seasons before it existed (2019-20).
+    Season types are skipped for seasons before they existed (play-in 2019-20,
+    NBA Cup final 2023-24).
     """
     results = []
     jobs = [
         (season, season_type)
         for season in seasons
         for season_type in season_types
-        if season_type != "Play-In" or has_play_in(season)
+        if season_type_existed(season, season_type)
     ]
     for index, (season, season_type) in enumerate(jobs):
         if index:
@@ -83,8 +86,11 @@ def backfill(
     return results
 
 
-def has_play_in(season: str) -> bool:
-    return season_start_year(season) >= season_start_year(PLAY_IN_FIRST_SEASON)
+def season_type_existed(season: str, season_type: str) -> bool:
+    first = {"Play-In": PLAY_IN_FIRST_SEASON, "NBA Cup Final": CUP_FINAL_FIRST_SEASON}
+    if season_type not in first:
+        return True
+    return season_start_year(season) >= season_start_year(first[season_type])
 
 
 def parse_args(argv: Sequence[str] | None, today: date) -> argparse.Namespace:

@@ -41,6 +41,7 @@ def set_column(response: dict, column: str, value, row_index: int = 0) -> None:
         ("42025", ("2025-26", "Playoffs")),
         ("21999", ("1999-00", "Regular Season")),
         ("52025", ("2025-26", "Play-In")),
+        ("62024", ("2024-25", "NBA Cup Final")),
         ("21946", ("1946-47", "Regular Season")),
     ],
 )
@@ -48,7 +49,7 @@ def test_season_from_id(season_id: str, expected: tuple[str, str]) -> None:
     assert season_from_id(season_id) == expected
 
 
-@pytest.mark.parametrize("season_id", ["12026", "32026", "62026", "2202", "2abcd"])
+@pytest.mark.parametrize("season_id", ["12026", "32026", "72026", "2202", "2abcd"])
 def test_season_from_id_rejects_unsupported(season_id: str) -> None:
     with pytest.raises(NormalizeError):
         season_from_id(season_id)

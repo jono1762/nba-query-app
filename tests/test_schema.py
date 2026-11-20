@@ -110,3 +110,11 @@ def test_always_recorded_stats_are_required(migrated: psycopg.Connection, column
             """,
             values,
         )
+
+
+def test_nba_cup_final_is_a_valid_season_type(migrated: psycopg.Connection) -> None:
+    insert_sample_game(migrated)
+    migrated.execute(
+        "INSERT INTO nba.games VALUES "
+        "('0062400001', '2024-12-17', '2024-25', 'NBA Cup Final', 1, 2)"
+    )

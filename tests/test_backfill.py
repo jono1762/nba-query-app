@@ -107,14 +107,19 @@ def test_args_reject_future_season() -> None:
         parse_args(["--to", "2027-28"], TODAY)
 
 
-def test_play_in_only_requested_from_2019_20(migrated: psycopg.Connection) -> None:
+def test_season_types_only_requested_once_they_existed(migrated: psycopg.Connection) -> None:
     fetch = FakeFetch()
-    run(migrated, ["2018-19", "2019-20"], ["Regular Season", "Play-In", "Playoffs"], fetch)
+    all_types = ["Regular Season", "NBA Cup Final", "Play-In", "Playoffs"]
+    run(migrated, ["2018-19", "2019-20", "2023-24"], all_types, fetch)
 
     assert fetch.calls == [
         ("2018-19", "Regular Season"),
         ("2018-19", "Playoffs"),
-        ("2019-20", "Regular Season"),
+        ("2019-20", "Regular Season"),  # play-in from 2019-20
         ("2019-20", "Play-In"),
         ("2019-20", "Playoffs"),
+        ("2023-24", "Regular Season"),  # NBA Cup final from 2023-24
+        ("2023-24", "NBA Cup Final"),
+        ("2023-24", "Play-In"),
+        ("2023-24", "Playoffs"),
     ]

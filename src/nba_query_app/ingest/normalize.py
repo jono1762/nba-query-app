@@ -21,7 +21,12 @@ from datetime import date
 from typing import Any
 
 # SEASON_ID looks like '22026': the first digit is the season type, the rest the start year.
-SEASON_TYPE_BY_PREFIX = {"2": "Regular Season", "4": "Playoffs", "5": "Play-In"}
+SEASON_TYPE_BY_PREFIX = {
+    "2": "Regular Season",
+    "4": "Playoffs",
+    "5": "Play-In",
+    "6": "NBA Cup Final",
+}
 
 
 class NormalizeError(ValueError):
