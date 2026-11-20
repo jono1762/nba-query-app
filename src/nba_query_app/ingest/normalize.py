@@ -10,8 +10,8 @@ Many stats weren't recorded in early seasons. Those arrive as null and stay None
 seasons report 0 for every player, so a game where everyone has 0 minutes is
 treated as "minutes not recorded". Likewise, an attempts figure lower than the
 makes (impossible, but present in old box scores) is treated as not recorded,
-a W/L missing from a single player row is filled in from the teammates, and a
-player listed on both teams in one game is resolved to a single row.
+a W/L missing from a single player row is filled in from the teammates, and
+ghost copies of a player listed on both teams in one game are removed.
 
 This module does no network or database work, so it is easy to test.
 """
@@ -208,9 +208,9 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
             )
         )
 
-    keys = [(s.game_id, s.player_id) for s in stats]
+    keys = [(s.game_id, s.player_id, s.team_id) for s in stats]
     if len(keys) != len(set(keys)):  # would silently overwrite each other in the database
-        raise NormalizeError("A player appears more than once in the same game")
+        raise NormalizeError("A player appears more than once for the same team in a game")
 
     return Batch(
         teams=list(teams.values()),
@@ -265,12 +265,19 @@ def _real_stats(row: dict[str, Any]) -> tuple:
 
 
 def _resolve_duplicate_player_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Old box scores occasionally list one player on both teams in the same game.
+    """Handle a player listed on both teams in the same game (old box scores).
 
-    Keep the copy with real stats (e.g. Bob Cousy 1951-52: 13 points for BOS, all
-    zeros for BAL). If the copies are identical, keep the team the player was on in
-    his nearest other game that season. If that can't decide it, drop the copies
-    when they are all zeros (nothing lost); otherwise refuse.
+    Usually one copy is a ghost of the other:
+    - A copy with no points or makes beside one with them is dropped
+      (Bob Cousy 1951-52: 13 pts for BOS; for BAL, 0 pts and a stray FT attempt).
+    - Copies with the same points, makes and free throws made are one performance:
+      keep the most complete copy (John Shumate 1977-78: full box score for DET,
+      partial for BUF). On a tie, keep the team from the player's nearest other game.
+    - All-zero copies that can't be placed are dropped (nothing is lost).
+
+    Copies with different real scoring are both genuine and both kept: the
+    protested 76ers-Nets game of 1978-11-08 was finished after Eric Money was traded
+    between them, so he scored for both teams in one game.
     """
     by_key: dict[tuple[str, int], list[dict[str, Any]]] = {}
     for row in raw_rows:
@@ -282,22 +289,40 @@ def _resolve_duplicate_player_rows(raw_rows: list[dict[str, Any]]) -> list[dict[
     for (game_id, player_id), copies in by_key.items():
         if len(copies) == 1:
             continue
-        with_stats = [r for r in copies if any(_real_stats(r))]
-        if len(with_stats) == 1:
-            keep = with_stats[0]
-        elif len({_real_stats(r) for r in copies}) == 1:
-            keep = _copy_matching_nearest_game(copies, raw_rows)
-            if keep is None and not with_stats:
-                drop.update(id(r) for r in copies)
-                continue
-            if keep is None:
-                raise NormalizeError(
-                    f"Can't tell which team player {player_id} was on in {game_id}"
-                )
+        scored = [r for r in copies if any(_scoring(r))]
+        if not scored:
+            keep = _pick_one(copies, raw_rows)
+            kept = [keep] if keep is not None else []
         else:
-            raise NormalizeError(f"Player {player_id} has conflicting rows in game {game_id}")
-        drop.update(id(r) for r in copies if r is not keep)
+            performances: dict[tuple, list[dict[str, Any]]] = {}
+            for row in scored:
+                performances.setdefault(_scoring(row), []).append(row)
+            kept = []
+            for same in performances.values():
+                keep = _pick_one(same, raw_rows)
+                if keep is None:
+                    raise NormalizeError(
+                        f"Can't tell which team player {player_id} was on in {game_id}"
+                    )
+                kept.append(keep)
+        drop.update(id(r) for r in copies if not any(r is k for k in kept))
     return [row for row in raw_rows if id(row) not in drop]
+
+
+def _scoring(row: dict[str, Any]) -> tuple:
+    return tuple(row[source] or 0 for source in REQUIRED_STATS.values())
+
+
+def _pick_one(copies: list[dict[str, Any]], raw_rows: list[dict[str, Any]]) -> dict | None:
+    """The most complete copy; on a tie, the one matching the player's nearest other game."""
+    if len(copies) == 1:
+        return copies[0]
+    completeness = {id(r): sum(1 for value in _real_stats(r) if value) for r in copies}
+    best = max(completeness.values())
+    candidates = [r for r in copies if completeness[id(r)] == best]
+    if len(candidates) == 1:
+        return candidates[0]
+    return _copy_matching_nearest_game(candidates, raw_rows)
 
 
 def _copy_matching_nearest_game(

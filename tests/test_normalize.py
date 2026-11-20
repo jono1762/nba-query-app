@@ -309,13 +309,19 @@ def raw_row(game_id: str, team_id: int, day: str, pts: int = 0, player_id: int =
 
 
 def test_copy_with_real_stats_wins() -> None:
-    # Real example: Bob Cousy 1951-52, 13 pts for BOS and an all-zero row for BAL.
     real, empty = raw_row("g1", BOS, "1951-12-01", pts=13), raw_row("g1", DET, "1951-12-01")
     assert _resolve_duplicate_player_rows([empty, real]) == [real]
 
 
+def test_copy_with_points_beats_copy_with_only_stray_stats() -> None:
+    # Real example: Bob Cousy 1951-52, 13 pts for BOS; for BAL 0 pts but 1 FT attempted.
+    real = raw_row("g1", BOS, "1951-12-01", pts=13)
+    ghost = raw_row("g1", DET, "1951-12-01")
+    ghost["FTA"] = 1
+    assert _resolve_duplicate_player_rows([ghost, real]) == [real]
+
+
 def test_identical_copies_use_team_from_nearest_other_game() -> None:
-    # Real example: Dwight Jones 1979-80, identical rows for CHI and HOU (traded that season).
     chi = raw_row("g2", BOS, "1979-12-05", pts=17)
     hou = raw_row("g2", DET, "1979-12-05", pts=17)
     earlier = raw_row("g1", DET, "1979-12-01", pts=10)  # 4 days before: on DET
@@ -337,10 +343,19 @@ def test_undecidable_copies_with_stats_are_an_error() -> None:
         _resolve_duplicate_player_rows(rows)
 
 
-def test_conflicting_copies_are_an_error() -> None:
-    rows = [raw_row("g1", BOS, "1979-12-05", pts=17), raw_row("g1", DET, "1979-12-05", pts=9)]
-    with pytest.raises(NormalizeError, match="conflicting rows"):
-        _resolve_duplicate_player_rows(rows)
+def test_different_scoring_for_each_team_is_genuine_and_both_kept() -> None:
+    # Real example: Eric Money in the protested 76ers-Nets game of 1978-11-08,
+    # finished after his trade: 23 pts for NJN and 4 pts for PHL.
+    nets, sixers = raw_row("g1", BOS, "1978-11-08", pts=23), raw_row("g1", DET, "1978-11-08", pts=4)
+    assert _resolve_duplicate_player_rows([nets, sixers]) == [nets, sixers]
+
+
+def test_most_complete_copy_of_one_performance_wins() -> None:
+    # Real example: John Shumate 1977-78, 16 pts for both DET (full box score) and BUF (partial).
+    full = raw_row("g1", DET, "1977-12-30", pts=16)
+    full.update({"MIN": 38, "FGA": 7, "REB": 7})
+    partial = raw_row("g1", BOS, "1977-12-30", pts=16)
+    assert _resolve_duplicate_player_rows([partial, full]) == [full]
 
 
 def test_duplicate_in_a_real_response_is_resolved(response: dict) -> None:
