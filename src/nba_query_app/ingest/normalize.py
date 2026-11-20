@@ -10,7 +10,8 @@ Many stats weren't recorded in early seasons. Those arrive as null and stay None
 seasons report 0 for every player, so a game where everyone has 0 minutes is
 treated as "minutes not recorded". Likewise, an attempts figure lower than the
 makes (impossible, but present in old box scores) is treated as not recorded,
-and a W/L missing from a single player row is filled in from the teammates.
+a W/L missing from a single player row is filled in from the teammates, and a
+player listed on both teams in one game is resolved to a single row.
 
 This module does no network or database work, so it is easy to test.
 """
@@ -146,6 +147,7 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
     result = response["resultSets"][0]
     headers: list[str] = result["headers"]
     raw_rows = [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
+    raw_rows = _resolve_duplicate_player_rows(raw_rows)
 
     home_away = _home_and_away_by_game(raw_rows)
     minutes_missing = _games_without_minutes(raw_rows)
@@ -206,6 +208,10 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
             )
         )
 
+    keys = [(s.game_id, s.player_id) for s in stats]
+    if len(keys) != len(set(keys)):  # would silently overwrite each other in the database
+        raise NormalizeError("A player appears more than once in the same game")
+
     return Batch(
         teams=list(teams.values()),
         players=list(players.values()),
@@ -249,6 +255,63 @@ def _home_and_away_by_game(
         else:
             raise NormalizeError(f"Both teams are listed as home in game {game_id}")
     return result
+
+
+def _real_stats(row: dict[str, Any]) -> tuple:
+    """The row's stat values with "not recorded" and 0 treated alike, for comparison."""
+    return tuple(
+        row[source] or 0 for source in [*REQUIRED_STATS.values(), *OPTIONAL_STATS.values()]
+    )
+
+
+def _resolve_duplicate_player_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Old box scores occasionally list one player on both teams in the same game.
+
+    Keep the copy with real stats (e.g. Bob Cousy 1951-52: 13 points for BOS, all
+    zeros for BAL). If the copies are identical, keep the team the player was on in
+    his nearest other game that season. If that can't decide it, drop the copies
+    when they are all zeros (nothing lost); otherwise refuse.
+    """
+    by_key: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for row in raw_rows:
+        by_key.setdefault((row["GAME_ID"], row["PLAYER_ID"]), []).append(row)
+    if all(len(copies) == 1 for copies in by_key.values()):
+        return raw_rows
+
+    drop: set[int] = set()  # id() of rows to discard
+    for (game_id, player_id), copies in by_key.items():
+        if len(copies) == 1:
+            continue
+        with_stats = [r for r in copies if any(_real_stats(r))]
+        if len(with_stats) == 1:
+            keep = with_stats[0]
+        elif len({_real_stats(r) for r in copies}) == 1:
+            keep = _copy_matching_nearest_game(copies, raw_rows)
+            if keep is None and not with_stats:
+                drop.update(id(r) for r in copies)
+                continue
+            if keep is None:
+                raise NormalizeError(
+                    f"Can't tell which team player {player_id} was on in {game_id}"
+                )
+        else:
+            raise NormalizeError(f"Player {player_id} has conflicting rows in game {game_id}")
+        drop.update(id(r) for r in copies if r is not keep)
+    return [row for row in raw_rows if id(row) not in drop]
+
+
+def _copy_matching_nearest_game(
+    copies: list[dict[str, Any]], raw_rows: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The copy whose team matches the player's team in his closest other game by date."""
+    game_id, player_id = copies[0]["GAME_ID"], copies[0]["PLAYER_ID"]
+    day = date.fromisoformat(copies[0]["GAME_DATE"])
+    others = [r for r in raw_rows if r["PLAYER_ID"] == player_id and r["GAME_ID"] != game_id]
+    if not others:
+        return None
+    nearest = min(others, key=lambda r: abs((date.fromisoformat(r["GAME_DATE"]) - day).days))
+    matches = [r for r in copies if r["TEAM_ID"] == nearest["TEAM_ID"]]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _results_by_game_and_team(

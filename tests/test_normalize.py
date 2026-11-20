@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from nba_query_app.ingest.normalize import (
+    OPTIONAL_STATS,
+    REQUIRED_STATS,
     NormalizeError,
+    _resolve_duplicate_player_rows,
     normalize_league_game_log,
     parse_is_home,
     season_from_id,
@@ -292,3 +295,69 @@ def test_consistent_attempts_are_kept(response: dict) -> None:
     set_column(response, "FTM", 3)
     set_column(response, "FTA", 3)
     assert normalize_league_game_log(response).stats[0].fta == 3
+
+
+# --- Player listed on both teams in one game ---------------------------------
+
+
+def raw_row(game_id: str, team_id: int, day: str, pts: int = 0, player_id: int = 7) -> dict:
+    """A minimal raw row, as produced from the response, for the duplicate helpers."""
+    row = {"GAME_ID": game_id, "PLAYER_ID": player_id, "TEAM_ID": team_id, "GAME_DATE": day}
+    row.update({source: 0 for source in [*REQUIRED_STATS.values(), *OPTIONAL_STATS.values()]})
+    row["PTS"] = pts
+    return row
+
+
+def test_copy_with_real_stats_wins() -> None:
+    # Real example: Bob Cousy 1951-52, 13 pts for BOS and an all-zero row for BAL.
+    real, empty = raw_row("g1", BOS, "1951-12-01", pts=13), raw_row("g1", DET, "1951-12-01")
+    assert _resolve_duplicate_player_rows([empty, real]) == [real]
+
+
+def test_identical_copies_use_team_from_nearest_other_game() -> None:
+    # Real example: Dwight Jones 1979-80, identical rows for CHI and HOU (traded that season).
+    chi = raw_row("g2", BOS, "1979-12-05", pts=17)
+    hou = raw_row("g2", DET, "1979-12-05", pts=17)
+    earlier = raw_row("g1", DET, "1979-12-01", pts=10)  # 4 days before: on DET
+    later = raw_row("g3", BOS, "1980-03-01", pts=8)  # months later: on BOS
+
+    result = _resolve_duplicate_player_rows([chi, hou, earlier, later])
+    assert hou in result and chi not in result
+
+
+def test_undecidable_all_zero_copies_are_dropped() -> None:
+    # Real example: John Murphy 1946-47, all-zero rows for both teams, no other games.
+    rows = [raw_row("g1", BOS, "1946-12-01"), raw_row("g1", DET, "1946-12-01")]
+    assert _resolve_duplicate_player_rows(rows) == []
+
+
+def test_undecidable_copies_with_stats_are_an_error() -> None:
+    rows = [raw_row("g1", BOS, "1979-12-05", pts=17), raw_row("g1", DET, "1979-12-05", pts=17)]
+    with pytest.raises(NormalizeError, match="Can't tell which team"):
+        _resolve_duplicate_player_rows(rows)
+
+
+def test_conflicting_copies_are_an_error() -> None:
+    rows = [raw_row("g1", BOS, "1979-12-05", pts=17), raw_row("g1", DET, "1979-12-05", pts=9)]
+    with pytest.raises(NormalizeError, match="conflicting rows"):
+        _resolve_duplicate_player_rows(rows)
+
+
+def test_duplicate_in_a_real_response_is_resolved(response: dict) -> None:
+    headers = response["resultSets"][0]["headers"]
+    rows = response["resultSets"][0]["rowSet"]
+    bos_row = next(r for r in rows if r[headers.index("TEAM_ID")] == BOS)
+    ghost = list(bos_row)  # same player, wrongly also listed for DET with no stats
+    for column, value in [
+        ("TEAM_ID", DET),
+        ("TEAM_ABBREVIATION", "DET"),
+        ("MATCHUP", "DET vs. BOS"),
+    ]:
+        ghost[headers.index(column)] = value
+    for column in [*REQUIRED_STATS.values(), *OPTIONAL_STATS.values()]:
+        ghost[headers.index(column)] = 0
+    rows.append(ghost)
+
+    stats = normalize_league_game_log(response).stats
+    player = bos_row[headers.index("PLAYER_ID")]
+    assert [s.team_id for s in stats if s.player_id == player] == [BOS]
