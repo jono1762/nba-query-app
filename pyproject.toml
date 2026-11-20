@@ -5,7 +5,9 @@ description = "Ask NBA player stat questions in plain English; answers come from
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "nba-api>=1.10",
     "psycopg[binary]>=3.2",
+    "requests>=2.31",
 ]
 
 [dependency-groups]
