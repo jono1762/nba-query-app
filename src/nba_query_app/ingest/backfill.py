@@ -8,7 +8,7 @@ transaction. If the run stops partway, run it again: seasons already saved are
 re-checked quickly and unchanged rows are left alone.
 
 Usage:
-    uv run --env-file .env python -m nba_query_app.ingest.backfill                # 2000-01 to now
+    uv run --env-file .env python -m nba_query_app.ingest.backfill                # 1946-47 to now
     uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27 # current season
     uv run --env-file .env python -m nba_query_app.ingest.backfill --season-type playoffs
 """
@@ -28,11 +28,13 @@ from nba_query_app.ingest.load import LoadResult, load_batch
 from nba_query_app.ingest.normalize import normalize_league_game_log
 from nba_query_app.seasons import season_for_date, season_start_year, seasons_between
 
-FIRST_SEASON = "2000-01"
+FIRST_SEASON = "1946-47"  # the first BAA season; the BAA became the NBA in 1949
+PLAY_IN_FIRST_SEASON = "2019-20"
 SEASON_TYPE_CHOICES = {
     "regular": ("Regular Season",),
+    "play-in": ("Play-In",),
     "playoffs": ("Playoffs",),
-    "both": SEASON_TYPES,
+    "all": SEASON_TYPES,
 }
 
 
@@ -54,9 +56,17 @@ def backfill(
     sleep: Callable[[float], None] = time.sleep,
     log: Callable[[str], None] = print,
 ) -> list[SeasonResult]:
-    """Fetch, convert and load each season/type in turn, pausing between requests."""
+    """Fetch, convert and load each season/type in turn, pausing between requests.
+
+    Play-in is skipped for seasons before it existed (2019-20).
+    """
     results = []
-    jobs = [(season, season_type) for season in seasons for season_type in season_types]
+    jobs = [
+        (season, season_type)
+        for season in seasons
+        for season_type in season_types
+        if season_type != "Play-In" or has_play_in(season)
+    ]
     for index, (season, season_type) in enumerate(jobs):
         if index:
             sleep(pause_seconds)  # be polite to stats.nba.com
@@ -73,16 +83,20 @@ def backfill(
     return results
 
 
+def has_play_in(season: str) -> bool:
+    return season_start_year(season) >= season_start_year(PLAY_IN_FIRST_SEASON)
+
+
 def parse_args(argv: Sequence[str] | None, today: date) -> argparse.Namespace:
     current = season_for_date(today)
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "--from", dest="first", default=FIRST_SEASON, help="first season, e.g. 2000-01"
+        "--from", dest="first", default=FIRST_SEASON, help=f"first season (default {FIRST_SEASON})"
     )
     parser.add_argument(
         "--to", dest="last", default=current, help=f"last season (default {current})"
     )
-    parser.add_argument("--season-type", choices=SEASON_TYPE_CHOICES, default="both")
+    parser.add_argument("--season-type", choices=SEASON_TYPE_CHOICES, default="all")
     parser.add_argument("--pause", type=float, default=1.0, help="seconds between requests")
     args = parser.parse_args(argv)
 

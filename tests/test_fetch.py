@@ -58,3 +58,20 @@ def test_gives_up_after_all_attempts() -> None:
 def test_rejects_unknown_season_type() -> None:
     with pytest.raises(ValueError):
         fetch_league_game_log("2026-27", "Preseason", request=FakeRequests(), sleep=lambda s: None)
+
+
+def test_play_in_uses_the_api_spelling(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = {}
+
+    class FakeEndpoint:
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+        def get_dict(self):
+            return GOOD
+
+    monkeypatch.setattr("nba_query_app.ingest.fetch.leaguegamelog.LeagueGameLog", FakeEndpoint)
+    fetch_league_game_log("2025-26", "Play-In", sleep=lambda s: None)
+
+    assert seen["season_type_all_star"] == "PlayIn"
+    assert seen["player_or_team_abbreviation"] == "P"

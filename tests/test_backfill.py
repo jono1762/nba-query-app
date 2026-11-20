@@ -89,12 +89,12 @@ def test_failure_keeps_seasons_already_saved(migrated: psycopg.Connection) -> No
     assert migrated.execute("SELECT count(*) FROM nba.player_game_stats").fetchone() == (41,)
 
 
-def test_args_default_to_full_history_both_types() -> None:
+def test_args_default_to_full_history_all_types() -> None:
     args = parse_args([], TODAY)
-    assert args.seasons[0] == "2000-01"
+    assert args.seasons[0] == "1946-47"
     assert args.seasons[-1] == "2026-27"
-    assert len(args.seasons) == 27
-    assert args.season_type == "both"
+    assert len(args.seasons) == 81
+    assert args.season_type == "all"
 
 
 def test_args_single_season() -> None:
@@ -105,3 +105,16 @@ def test_args_single_season() -> None:
 def test_args_reject_future_season() -> None:
     with pytest.raises(SystemExit):
         parse_args(["--to", "2027-28"], TODAY)
+
+
+def test_play_in_only_requested_from_2019_20(migrated: psycopg.Connection) -> None:
+    fetch = FakeFetch()
+    run(migrated, ["2018-19", "2019-20"], ["Regular Season", "Play-In", "Playoffs"], fetch)
+
+    assert fetch.calls == [
+        ("2018-19", "Regular Season"),
+        ("2018-19", "Playoffs"),
+        ("2019-20", "Regular Season"),
+        ("2019-20", "Play-In"),
+        ("2019-20", "Playoffs"),
+    ]

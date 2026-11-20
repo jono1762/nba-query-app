@@ -12,7 +12,10 @@ from typing import Any
 import requests
 from nba_api.stats.endpoints import leaguegamelog
 
-SEASON_TYPES = ("Regular Season", "Playoffs")
+# Our season type labels, in the order games happen. Play-in exists from 2019-20.
+SEASON_TYPES = ("Regular Season", "Play-In", "Playoffs")
+# stats.nba.com spells play-in without the hyphen.
+API_SEASON_TYPE = {"Regular Season": "Regular Season", "Play-In": "PlayIn", "Playoffs": "Playoffs"}
 
 
 class FetchError(RuntimeError):
@@ -22,7 +25,7 @@ class FetchError(RuntimeError):
 def _request_league_game_log(season: str, season_type: str, timeout: float) -> dict[str, Any]:
     endpoint = leaguegamelog.LeagueGameLog(
         season=season,
-        season_type_all_star=season_type,
+        season_type_all_star=API_SEASON_TYPE[season_type],
         player_or_team_abbreviation="P",  # one row per player per game
         timeout=timeout,
     )
