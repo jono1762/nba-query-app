@@ -220,13 +220,20 @@ def _home_and_away_by_game(
     """For each game: (home team, away team, {team: its opponent}).
 
     Home and away are None for neutral-site games, where both teams are listed as away.
+    Each team's home/away is the majority of its players' rows: old box scores
+    occasionally mislabel a couple of rows (e.g. 10 say '@', 2 say 'vs.').
     """
-    is_home_by_game: dict[str, dict[int, bool]] = {}
+    votes: dict[str, dict[int, list[int]]] = {}  # game -> team -> [home votes, away votes]
     for row in raw_rows:
-        flags = is_home_by_game.setdefault(row["GAME_ID"], {})
-        is_home = parse_is_home(row["MATCHUP"])
-        if flags.setdefault(row["TEAM_ID"], is_home) != is_home:
-            raise NormalizeError(f"Rows for game {row['GAME_ID']} disagree about home/away")
+        tally = votes.setdefault(row["GAME_ID"], {}).setdefault(row["TEAM_ID"], [0, 0])
+        tally[0 if parse_is_home(row["MATCHUP"]) else 1] += 1
+
+    is_home_by_game: dict[str, dict[int, bool]] = {}
+    for game_id, teams in votes.items():
+        for team_id, (home_votes, away_votes) in teams.items():
+            if home_votes == away_votes:
+                raise NormalizeError(f"Rows for game {game_id} disagree about home/away")
+            is_home_by_game.setdefault(game_id, {})[team_id] = home_votes > away_votes
 
     result = {}
     for game_id, flags in is_home_by_game.items():

@@ -217,8 +217,23 @@ def test_both_teams_home_is_an_error(response: dict) -> None:
         normalize_league_game_log(response)
 
 
-def test_one_team_listed_both_home_and_away_is_an_error(response: dict) -> None:
+def test_a_mislabelled_row_is_outvoted_by_teammates(response: dict) -> None:
+    # Real example: 1967-68 SFW at SDR, where 10 rows say '@' and 2 say 'vs.'.
     set_column(response, "MATCHUP", "PHI vs. NYK", row_index=0)  # row 0 is PHI, really away
+    game = next(g for g in normalize_league_game_log(response).games if g.game_id == "0022600002")
+    assert (game.home_team_id, game.away_team_id) == (NYK, PHI)
+
+
+def test_a_tied_home_away_vote_is_an_error(response: dict) -> None:
+    headers = response["resultSets"][0]["headers"]
+    rows = response["resultSets"][0]["rowSet"]
+    phi_rows = [i for i, r in enumerate(rows) if r[headers.index("TEAM_ID")] == PHI]
+    if len(phi_rows) % 2:  # make the count even so an exact tie is possible
+        rows.pop(phi_rows[-1])
+        phi_rows = phi_rows[:-1]
+    for i in phi_rows[: len(phi_rows) // 2]:
+        set_column(response, "MATCHUP", "PHI vs. NYK", row_index=i)
+
     with pytest.raises(NormalizeError, match="home/away"):
         normalize_league_game_log(response)
 
