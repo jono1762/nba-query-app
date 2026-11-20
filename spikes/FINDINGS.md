@@ -37,3 +37,19 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
   one request and adds only new rows, so missed days catch up on their own.
 - cdn.nba.com is dropped. Its test script was deleted, but it's still in git
   history (commit a370626) if a cloud-based update is ever tested from AWS.
+
+## Full backfill (2026-11-20)
+- 27 seasons (2000-01 to 2026-27), regular season and playoffs: 54 requests in
+  116 seconds with a 1-second pause between them. No errors and no retries needed.
+- Result: 699,228 player-game rows, 33,636 games, 2,641 players, 30 teams.
+  The whole database is 140 MB, within Neon's free 0.5 GB.
+- Sanity checks passed:
+  - 1,230 regular-season games in a normal 30-team season (1,189 in 2000-01
+    with 29 teams).
+  - Shortened seasons show fewer games (2011-12: 990, 2019-20: 1,059).
+  - Known records are present (Kobe 81 on 2006-01-22, Dončić 73 on 2024-01-26).
+- **11 neutral-site games** were detected. They match known neutral venues: Mexico
+  City (MIA-WAS 2024-11-02, DAL-DET 2025-11-01), the Las Vegas NBA Cup
+  semifinals (2024-12-14), and Paris (IND-SAS, January 2025).
+  - Earlier international games are listed with a normal home team, so they
+    aren't flagged.

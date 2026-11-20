@@ -9,10 +9,9 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com normalizer and loader
+- stats.nba.com downloader, normalizer, loader and backfill CLI (the local DB holds 2000-01 to now)
 
 Not built yet:
-- history download CLI
 - SQL safety checker
 - LLM pipeline and accuracy eval
 - API and frontend
@@ -32,7 +31,11 @@ uv run --env-file .env python -m nba_query_app.db.migrate   # apply migrations
 uv run ruff check . && uv run ruff format --check .    # lint + format check (CI runs both)
 uv run --env-file .env pytest                          # all tests
 uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated   # one test
+
+uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|playoffs|both]
 ```
+
+The backfill makes real requests to stats.nba.com (about 54 for the full history, roughly 2 minutes). Run it only when data is actually needed.
 
 Without `DATABASE_URL`, database tests are **skipped**. With `REQUIRE_DATABASE=1` (set in CI) they **fail** instead.
 
@@ -40,9 +43,11 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 
 ## Architecture
 
-**Data flow.** stats.nba.com `LeagueGameLog` (player mode) returns a whole season in one request.
+**Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch → normalize → load. Each one commits on its own, so a crash keeps earlier seasons.
+- `ingest/fetch.py` calls stats.nba.com `LeagueGameLog` (player mode), which returns a whole season in one request. It retries with increasing waits and raises `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats`.
 - `ingest/load.py` upserts a `Batch` in one transaction.
+- Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.
 

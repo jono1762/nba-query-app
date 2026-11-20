@@ -26,8 +26,8 @@ Decisions:
 | 1a | Project skeleton, lint, tests, Docker Postgres, CI | Done |
 | 1b | Tables and database roles | Done |
 | 2a | Convert NBA data into table rows; idempotent loader | Done |
-| 2b | History download, into the **local database first** | Next |
-| 2c | Season-totals view and spot-checks | |
+| 2b | History download, into the **local database first** | Done: 699k rows, 140 MB |
+| 2c | Season-totals view and spot-checks | Next |
 | 3 | SQL safety checker | |
 | 4 | Connect Gemini | |
 | 5 | Accuracy test | |
@@ -119,7 +119,7 @@ On your laptop:
 
 **Phase 2: Load the data**
 - 2a: Convert NBA's data into our tables; loading twice changes nothing. Handles neutral-site games and team renames. Done.
-- 2b: History download script for every season from 2000-01, regular season and playoffs. It can resume if interrupted and runs into the **local database for now**. Copying to Neon happens when we deploy (Phase 8).
+- 2b: History download command for every season from 2000-01, regular season and playoffs, into the **local database for now**. If it's interrupted, just rerun it. Done: 27 seasons in about 2 minutes. Copying to Neon happens when we deploy (Phase 8).
 - 2c: Season-totals view, and spot-checks against well-known real numbers.
 
 **Phase 3: Safety checker (no AI yet)**

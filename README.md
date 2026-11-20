@@ -21,6 +21,17 @@ uv run ruff format .                 # auto-format
 uv run --env-file .env pytest        # all tests (database tests need Postgres running)
 ```
 
+## Loading NBA data
+
+Data comes from stats.nba.com, which blocks cloud servers, so run this from a home
+connection. A whole season is one request. Reruns are safe: unchanged rows are skipped.
+
+```bash
+uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 2000-01 to now (~2 min)
+uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27  # just the current season
+uv run --env-file .env python -m nba_query_app.ingest.backfill --help          # all options
+```
+
 ## Database
 
 - `migrations/` holds numbered SQL files, applied in order, once each.
