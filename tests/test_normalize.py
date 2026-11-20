@@ -219,3 +219,28 @@ def test_single_zero_minute_player_is_a_real_zero(response: dict) -> None:
     # Modern data: under 30 seconds on court rounds down to 0. That is real.
     set_column(response, "MIN", 0, row_index=0)
     assert normalize_league_game_log(response).stats[0].minutes == 0
+
+
+@pytest.mark.parametrize(
+    ("made", "attempted", "field"),
+    [("FTM", "FTA", "fta"), ("FGM", "FGA", "fga"), ("FG3M", "FG3A", "fg3a")],
+)
+def test_fewer_attempts_than_makes_means_attempts_not_recorded(
+    response: dict, made: str, attempted: str, field: str
+) -> None:
+    # Real example: a 1946-47 box score with 1 free throw made and 0 attempted.
+    set_column(response, made, 1)
+    set_column(response, attempted, 0)
+    if made == "FG3M":
+        set_column(response, "FGM", 1)
+        set_column(response, "FGA", 1)
+
+    row = normalize_league_game_log(response).stats[0]
+    assert getattr(row, field) is None
+    assert getattr(row, made.lower()) == 1  # makes are kept
+
+
+def test_consistent_attempts_are_kept(response: dict) -> None:
+    set_column(response, "FTM", 3)
+    set_column(response, "FTA", 3)
+    assert normalize_league_game_log(response).stats[0].fta == 3

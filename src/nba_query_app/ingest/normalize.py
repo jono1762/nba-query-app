@@ -8,7 +8,8 @@ The response has one row per player per game. From it we derive:
 Many stats weren't recorded in early seasons. Those arrive as null and stay None
 ("not recorded", which is different from 0). The one exception is minutes: early
 seasons report 0 for every player, so a game where everyone has 0 minutes is
-treated as "minutes not recorded".
+treated as "minutes not recorded". Likewise, an attempts figure lower than the
+makes (impossible, but present in old box scores) is treated as not recorded.
 
 This module does no network or database work, so it is easy to test.
 """
@@ -109,6 +110,7 @@ OPTIONAL_STATS = {
     "pf": "PF",
     "plus_minus": "PLUS_MINUS",
 }
+PAIRS_MADE_ATTEMPTED = (("fgm", "fga"), ("fg3m", "fg3a"), ("ftm", "fta"))
 
 
 def season_from_id(season_id: str) -> tuple[str, str]:
@@ -184,6 +186,7 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
             if row[source] is None:
                 raise NormalizeError(f"Missing {source} for player {row['PLAYER_ID']} in {game_id}")
             counting[column] = row[source]
+        _drop_impossible_attempts(counting)
 
         stats.append(
             PlayerGameStats(
@@ -234,6 +237,21 @@ def _home_and_away_by_game(
         else:
             raise NormalizeError(f"Both teams are listed as home in game {game_id}")
     return result
+
+
+def _drop_impossible_attempts(counting: dict[str, int | None]) -> None:
+    """Old box scores sometimes show fewer attempts than makes (e.g. 1 FT made, 0 attempted).
+
+    The attempts figure is the unreliable one (often a 0 meaning "not recorded"),
+    so it becomes None. The makes are kept because points depend on them.
+    """
+    for made, attempted in PAIRS_MADE_ATTEMPTED:
+        if (
+            counting[made] is not None
+            and counting[attempted] is not None
+            and counting[attempted] < counting[made]
+        ):
+            counting[attempted] = None
 
 
 def _games_without_minutes(raw_rows: list[dict[str, Any]]) -> set[str]:
