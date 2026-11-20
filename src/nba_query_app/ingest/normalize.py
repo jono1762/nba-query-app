@@ -267,17 +267,19 @@ def _real_stats(row: dict[str, Any]) -> tuple:
 def _resolve_duplicate_player_rows(raw_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Handle a player listed on both teams in the same game (old box scores).
 
-    Usually one copy is a ghost of the other:
-    - A copy with no points or makes beside one with them is dropped
-      (Bob Cousy 1951-52: 13 pts for BOS; for BAL, 0 pts and a stray FT attempt).
+    A copy is "real" if it has points, makes or minutes played. Usually one copy
+    is a ghost of the other:
+    - A copy that isn't real, beside one that is, is dropped (Bob Cousy 1951-52:
+      13 pts for BOS; for BAL, 0 pts, no minutes and a stray FT attempt).
     - Copies with the same points, makes and free throws made are one performance:
       keep the most complete copy (John Shumate 1977-78: full box score for DET,
       partial for BUF). On a tie, keep the team from the player's nearest other game.
     - All-zero copies that can't be placed are dropped (nothing is lost).
 
-    Copies with different real scoring are both genuine and both kept: the
-    protested 76ers-Nets game of 1978-11-08 was finished after Eric Money was traded
-    between them, so he scored for both teams in one game.
+    Real copies with different scoring are both genuine and both kept: the
+    protested 76ers-Nets game of 1978-11-08 was finished after a trade, so Eric
+    Money, Ralph Simpson and Harvey Catchings played for both teams in one game
+    (Simpson's Nets row is 2 minutes and 2 assists but 0 points).
     """
     by_key: dict[tuple[str, int], list[dict[str, Any]]] = {}
     for row in raw_rows:
@@ -289,13 +291,13 @@ def _resolve_duplicate_player_rows(raw_rows: list[dict[str, Any]]) -> list[dict[
     for (game_id, player_id), copies in by_key.items():
         if len(copies) == 1:
             continue
-        scored = [r for r in copies if any(_scoring(r))]
-        if not scored:
+        real = [r for r in copies if any(_scoring(r)) or (r["MIN"] or 0) > 0]
+        if not real:
             keep = _pick_one(copies, raw_rows)
             kept = [keep] if keep is not None else []
         else:
             performances: dict[tuple, list[dict[str, Any]]] = {}
-            for row in scored:
+            for row in real:
                 performances.setdefault(_scoring(row), []).append(row)
             kept = []
             for same in performances.values():

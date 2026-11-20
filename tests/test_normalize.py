@@ -350,6 +350,15 @@ def test_different_scoring_for_each_team_is_genuine_and_both_kept() -> None:
     assert _resolve_duplicate_player_rows([nets, sixers]) == [nets, sixers]
 
 
+def test_zero_point_copy_with_minutes_is_genuine() -> None:
+    # Real example: Ralph Simpson in the same 1978 game: 8 pts for PHL, and for NJN
+    # 2 minutes and 2 assists but 0 points. Both are real.
+    sixers = raw_row("g1", DET, "1978-11-08", pts=8)
+    nets = raw_row("g1", BOS, "1978-11-08")
+    nets.update({"MIN": 2, "AST": 2})
+    assert _resolve_duplicate_player_rows([nets, sixers]) == [nets, sixers]
+
+
 def test_most_complete_copy_of_one_performance_wins() -> None:
     # Real example: John Shumate 1977-78, 16 pts for both DET (full box score) and BUF (partial).
     full = raw_row("g1", DET, "1977-12-30", pts=16)
