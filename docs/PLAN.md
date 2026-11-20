@@ -135,6 +135,7 @@ On your laptop:
 - It runs only when triggered by hand, to save the free AI allowance.
 
 **Phase 6: Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
+- Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
 **Phase 7: Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
 
