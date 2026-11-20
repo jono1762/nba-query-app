@@ -9,7 +9,8 @@ Many stats weren't recorded in early seasons. Those arrive as null and stay None
 ("not recorded", which is different from 0). The one exception is minutes: early
 seasons report 0 for every player, so a game where everyone has 0 minutes is
 treated as "minutes not recorded". Likewise, an attempts figure lower than the
-makes (impossible, but present in old box scores) is treated as not recorded.
+makes (impossible, but present in old box scores) is treated as not recorded,
+and a W/L missing from a single player row is filled in from the teammates.
 
 This module does no network or database work, so it is easy to test.
 """
@@ -131,7 +132,10 @@ def parse_is_home(matchup: str) -> bool:
     raise NormalizeError(f"Can't tell home/away from MATCHUP {matchup!r}")
 
 
-def parse_won(wl: str) -> bool:
+def parse_won(wl: str | None) -> bool | None:
+    """'W' -> True, 'L' -> False, missing -> None (filled in from teammates later)."""
+    if wl is None:
+        return None
     if wl not in ("W", "L"):
         raise NormalizeError(f"Unexpected WL value {wl!r}")
     return wl == "W"
@@ -145,6 +149,7 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
 
     home_away = _home_and_away_by_game(raw_rows)
     minutes_missing = _games_without_minutes(raw_rows)
+    team_won = _results_by_game_and_team(raw_rows, home_away)
 
     teams: dict[int, Team] = {}
     players: dict[int, Player] = {}
@@ -196,7 +201,7 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
                 team_abbreviation=row["TEAM_ABBREVIATION"],
                 opponent_team_id=opponent_id,
                 is_home=is_home,
-                won=parse_won(row["WL"]),
+                won=team_won[(game_id, team_id)],
                 **counting,
             )
         )
@@ -237,6 +242,36 @@ def _home_and_away_by_game(
         else:
             raise NormalizeError(f"Both teams are listed as home in game {game_id}")
     return result
+
+
+def _results_by_game_and_team(
+    raw_rows: list[dict[str, Any]],
+    home_away: dict[str, tuple[int | None, int | None, dict[int, int]]],
+) -> dict[tuple[str, int], bool]:
+    """Whether each team won each game, taken from its players' W/L values.
+
+    Old box scores occasionally miss W/L on a single player row, so a team's result
+    comes from any teammate, or failing that, the opposite of the opponent's result.
+    """
+    seen: dict[tuple[str, int], set[bool]] = {}
+    for row in raw_rows:
+        won = parse_won(row["WL"])
+        results = seen.setdefault((row["GAME_ID"], row["TEAM_ID"]), set())
+        if won is not None:
+            results.add(won)
+
+    team_won = {}
+    for (game_id, team_id), results in seen.items():
+        opponent_results = seen.get((game_id, home_away[game_id][2][team_id]), set())
+        if len(results) > 1 or len(opponent_results) > 1:
+            raise NormalizeError(f"Players disagree about who won game {game_id}")
+        if results:
+            team_won[(game_id, team_id)] = next(iter(results))
+        elif opponent_results:
+            team_won[(game_id, team_id)] = not next(iter(opponent_results))
+        else:
+            raise NormalizeError(f"No W/L result for either team in game {game_id}")
+    return team_won
 
 
 def _drop_impossible_attempts(counting: dict[str, int | None]) -> None:

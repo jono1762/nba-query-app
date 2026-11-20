@@ -149,8 +149,41 @@ def test_rows_disagreeing_about_a_game_is_an_error(response: dict) -> None:
 
 
 def test_bad_win_loss_is_an_error(response: dict) -> None:
-    set_column(response, "WL", None)
+    set_column(response, "WL", "T")
     with pytest.raises(NormalizeError, match="WL"):
+        normalize_league_game_log(response)
+
+
+def set_wl_for_team(response: dict, game_id: str, team_id: int, value) -> None:
+    headers = response["resultSets"][0]["headers"]
+    for row in response["resultSets"][0]["rowSet"]:
+        if row[headers.index("GAME_ID")] == game_id and row[headers.index("TEAM_ID")] == team_id:
+            row[headers.index("WL")] = value
+
+
+def test_missing_win_loss_on_one_player_comes_from_teammates(response: dict) -> None:
+    # Real example: 1959-60 box scores with W/L missing on single player rows.
+    set_column(response, "WL", None)  # row 0 is a PHI player; PHI won
+    row = normalize_league_game_log(response).stats[0]
+    assert row.won is True
+
+
+def test_missing_win_loss_for_a_whole_team_comes_from_opponent(response: dict) -> None:
+    set_wl_for_team(response, "0022600001", BOS, None)
+    stats = normalize_league_game_log(response).stats
+    assert all(s.won is False for s in stats if s.team_id == BOS)  # DET won
+
+
+def test_no_win_loss_for_either_team_is_an_error(response: dict) -> None:
+    set_wl_for_team(response, "0022600001", BOS, None)
+    set_wl_for_team(response, "0022600001", DET, None)
+    with pytest.raises(NormalizeError, match="No W/L"):
+        normalize_league_game_log(response)
+
+
+def test_teammates_disagreeing_about_the_result_is_an_error(response: dict) -> None:
+    set_column(response, "WL", "L", row_index=0)  # one PHI player says L, the rest W
+    with pytest.raises(NormalizeError, match="disagree about who won"):
         normalize_league_game_log(response)
 
 
