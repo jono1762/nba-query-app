@@ -5,6 +5,11 @@ The response has one row per player per game. From it we derive:
 - games (date, season, home and away team),
 - box score rows (with opponent, home/away and win/loss worked out).
 
+Many stats weren't recorded in early seasons. Those arrive as null and stay None
+("not recorded", which is different from 0). The one exception is minutes: early
+seasons report 0 for every player, so a game where everyone has 0 minutes is
+treated as "minutes not recorded".
+
 This module does no network or database work, so it is easy to test.
 """
 
@@ -13,7 +18,7 @@ from datetime import date
 from typing import Any
 
 # SEASON_ID looks like '22026': the first digit is the season type, the rest the start year.
-SEASON_TYPE_BY_PREFIX = {"2": "Regular Season", "4": "Playoffs"}
+SEASON_TYPE_BY_PREFIX = {"2": "Regular Season", "4": "Playoffs", "5": "Play-In"}
 
 
 class NormalizeError(ValueError):
@@ -55,22 +60,24 @@ class PlayerGameStats:
     opponent_team_id: int
     is_home: bool | None  # None at a neutral site
     won: bool
-    minutes: int
+    # Always recorded:
     pts: int
     fgm: int
-    fga: int
-    fg3m: int
-    fg3a: int
     ftm: int
-    fta: int
-    oreb: int
-    dreb: int
-    reb: int
-    ast: int
-    stl: int
-    blk: int
-    tov: int
-    pf: int
+    # None means "not recorded" (common in early seasons):
+    minutes: int | None
+    fga: int | None
+    fg3m: int | None
+    fg3a: int | None
+    fta: int | None
+    oreb: int | None
+    dreb: int | None
+    reb: int | None
+    ast: int | None
+    stl: int | None
+    blk: int | None
+    tov: int | None
+    pf: int | None
     plus_minus: int | None
 
 
@@ -82,15 +89,15 @@ class Batch:
     stats: list[PlayerGameStats]
 
 
-# Our column name -> stats.nba.com column name, for the plain counting stats.
-COUNTING_STATS = {
+# Our column name -> stats.nba.com column name.
+# Always present in the source; a missing value means the data is broken.
+REQUIRED_STATS = {"pts": "PTS", "fgm": "FGM", "ftm": "FTM"}
+# May be missing (not recorded), especially in early seasons.
+OPTIONAL_STATS = {
     "minutes": "MIN",
-    "pts": "PTS",
-    "fgm": "FGM",
     "fga": "FGA",
     "fg3m": "FG3M",
     "fg3a": "FG3A",
-    "ftm": "FTM",
     "fta": "FTA",
     "oreb": "OREB",
     "dreb": "DREB",
@@ -100,6 +107,7 @@ COUNTING_STATS = {
     "blk": "BLK",
     "tov": "TOV",
     "pf": "PF",
+    "plus_minus": "PLUS_MINUS",
 }
 
 
@@ -134,6 +142,7 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
     raw_rows = [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
 
     home_away = _home_and_away_by_game(raw_rows)
+    minutes_missing = _games_without_minutes(raw_rows)
 
     teams: dict[int, Team] = {}
     players: dict[int, Player] = {}
@@ -168,12 +177,13 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
         if games.setdefault(game_id, game) != game:
             raise NormalizeError(f"Rows for game {game_id} disagree about date or season")
 
-        counting = {}
-        for column, source in COUNTING_STATS.items():
-            value = row[source]
-            if value is None:
+        counting = {column: row[source] for column, source in OPTIONAL_STATS.items()}
+        if game_id in minutes_missing:
+            counting["minutes"] = None
+        for column, source in REQUIRED_STATS.items():
+            if row[source] is None:
                 raise NormalizeError(f"Missing {source} for player {row['PLAYER_ID']} in {game_id}")
-            counting[column] = value
+            counting[column] = row[source]
 
         stats.append(
             PlayerGameStats(
@@ -184,7 +194,6 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
                 opponent_team_id=opponent_id,
                 is_home=is_home,
                 won=parse_won(row["WL"]),
-                plus_minus=row["PLUS_MINUS"],
                 **counting,
             )
         )
@@ -225,6 +234,15 @@ def _home_and_away_by_game(
         else:
             raise NormalizeError(f"Both teams are listed as home in game {game_id}")
     return result
+
+
+def _games_without_minutes(raw_rows: list[dict[str, Any]]) -> set[str]:
+    """Games where every player shows 0 minutes: minutes weren't recorded, not truly 0."""
+    has_minutes: dict[str, bool] = {}
+    for row in raw_rows:
+        played = bool(row["MIN"])  # None or 0 -> False
+        has_minutes[row["GAME_ID"]] = has_minutes.get(row["GAME_ID"], False) or played
+    return {game_id for game_id, any_minutes in has_minutes.items() if not any_minutes}
 
 
 def _keep_latest(found: dict, key: int, candidate: Team | Player) -> None:

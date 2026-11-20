@@ -37,13 +37,15 @@ def set_column(response: dict, column: str, value, row_index: int = 0) -> None:
         ("22026", ("2026-27", "Regular Season")),
         ("42025", ("2025-26", "Playoffs")),
         ("21999", ("1999-00", "Regular Season")),
+        ("52025", ("2025-26", "Play-In")),
+        ("21946", ("1946-47", "Regular Season")),
     ],
 )
 def test_season_from_id(season_id: str, expected: tuple[str, str]) -> None:
     assert season_from_id(season_id) == expected
 
 
-@pytest.mark.parametrize("season_id", ["12026", "32026", "52026", "2202", "2abcd"])
+@pytest.mark.parametrize("season_id", ["12026", "32026", "62026", "2202", "2abcd"])
 def test_season_from_id_rejects_unsupported(season_id: str) -> None:
     with pytest.raises(NormalizeError):
         season_from_id(season_id)
@@ -125,8 +127,8 @@ def test_plus_minus_may_be_missing(response: dict) -> None:
     assert normalize_league_game_log(response).stats[0].plus_minus is None
 
 
-@pytest.mark.parametrize("column", ["PTS", "MIN", "REB"])
-def test_missing_counting_stat_is_an_error(response: dict, column: str) -> None:
+@pytest.mark.parametrize("column", ["PTS", "FGM", "FTM"])
+def test_missing_required_stat_is_an_error(response: dict, column: str) -> None:
     set_column(response, column, None)
     with pytest.raises(NormalizeError, match=column):
         normalize_league_game_log(response)
@@ -186,3 +188,34 @@ def test_one_team_listed_both_home_and_away_is_an_error(response: dict) -> None:
     set_column(response, "MATCHUP", "PHI vs. NYK", row_index=0)  # row 0 is PHI, really away
     with pytest.raises(NormalizeError, match="home/away"):
         normalize_league_game_log(response)
+
+
+@pytest.mark.parametrize(
+    ("column", "field"),
+    [("REB", "reb"), ("AST", "ast"), ("BLK", "blk"), ("FG3A", "fg3a"), ("TOV", "tov")],
+)
+def test_unrecorded_stat_is_kept_as_none(response: dict, column: str, field: str) -> None:
+    set_column(response, column, None)
+    assert getattr(normalize_league_game_log(response).stats[0], field) is None
+
+
+def set_minutes_for_game(response: dict, game_id: str, minutes) -> None:
+    headers = response["resultSets"][0]["headers"]
+    for row in response["resultSets"][0]["rowSet"]:
+        if row[headers.index("GAME_ID")] == game_id:
+            row[headers.index("MIN")] = minutes
+
+
+def test_game_where_everyone_has_zero_minutes_means_not_recorded(response: dict) -> None:
+    # Early seasons (e.g. 1946-47) report MIN = 0 for every player.
+    set_minutes_for_game(response, "0022600001", 0)
+    stats = normalize_league_game_log(response).stats
+
+    assert all(s.minutes is None for s in stats if s.game_id == "0022600001")
+    assert all(s.minutes is not None for s in stats if s.game_id == "0022600002")
+
+
+def test_single_zero_minute_player_is_a_real_zero(response: dict) -> None:
+    # Modern data: under 30 seconds on court rounds down to 0. That is real.
+    set_column(response, "MIN", 0, row_index=0)
+    assert normalize_league_game_log(response).stats[0].minutes == 0

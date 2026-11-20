@@ -74,3 +74,39 @@ def test_rejects_more_makes_than_attempts(migrated: psycopg.Connection) -> None:
                  17, 5, 7, 6, 1, 5, 2, 2, 1, 3, 4, 1, 0, 0, 1, 1, -4)
             """
         )
+
+
+def test_play_in_is_a_valid_season_type(migrated: psycopg.Connection) -> None:
+    insert_sample_game(migrated)
+    migrated.execute(
+        "INSERT INTO nba.games VALUES ('0052500001', '2026-04-14', '2025-26', 'Play-In', 1, 2)"
+    )
+
+
+def test_unrecorded_stats_may_be_null(migrated: psycopg.Connection) -> None:
+    # Like a 1946-47 box score: points and makes only.
+    insert_sample_game(migrated)
+    migrated.execute(
+        """
+        INSERT INTO nba.player_game_stats (game_id, player_id, team_id, team_abbreviation,
+            opponent_team_id, is_home, won, pts, fgm, ftm)
+        VALUES ('0022600003', 10, 1, 'OKC', 2, false, true, 12, 5, 2)
+        """
+    )
+    row = migrated.execute("SELECT minutes, reb, blk FROM nba.player_game_stats").fetchone()
+    assert row == (None, None, None)
+
+
+@pytest.mark.parametrize("column", ["pts", "fgm", "ftm"])
+def test_always_recorded_stats_are_required(migrated: psycopg.Connection, column: str) -> None:
+    insert_sample_game(migrated)
+    values = {"pts": 12, "fgm": 5, "ftm": 2, column: None}
+    with pytest.raises(psycopg.errors.NotNullViolation):
+        migrated.execute(
+            """
+            INSERT INTO nba.player_game_stats (game_id, player_id, team_id, team_abbreviation,
+                opponent_team_id, is_home, won, pts, fgm, ftm)
+            VALUES ('0022600003', 10, 1, 'OKC', 2, false, true, %(pts)s, %(fgm)s, %(ftm)s)
+            """,
+            values,
+        )
