@@ -10,7 +10,7 @@ A website where someone types a question like *"Who scored the most points in Ma
 3. The website shows the answer, taken from the actual data and not from the AI's memory.
 
 Decisions:
-- **Data:** every player's stats for every game (regular season and playoffs), plus season totals, from 2000-01 to today. Source: stats.nba.com only.
+- **Data:** every player's stats for every game (regular season, play-in and playoffs), plus season totals, for the **full history from 1946-47** to today. Source: stats.nba.com only. Stats that weren't recorded in early seasons are stored as "not recorded" (NULL), and the AI must refuse or caveat questions about them.
 - **AWS setup tool:** AWS SAM.
 - **Frontend:** a plain webpage with no framework.
 - **Access:** anyone can use it, with a limit on how often each visitor can ask.
@@ -26,7 +26,7 @@ Decisions:
 | 1a | Project skeleton, lint, tests, Docker Postgres, CI | Done |
 | 1b | Tables and database roles | Done |
 | 2a | Convert NBA data into table rows; idempotent loader | Done |
-| 2b | History download, into the **local database first** | Done: 699k rows, 140 MB |
+| 2b | Full history download (1946-47 on, plus play-in), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 2c | Season-totals view and spot-checks | Next |
 | 3 | SQL safety checker | |
 | 4 | Connect Gemini | |
@@ -78,7 +78,7 @@ CloudFront ──► S3 (the webpage files)
                                                          └─► runs SQL on Neon Postgres
 
 On your laptop:
-  one time:   history download ──► stats.nba.com (2000-01 to today) ──► database
+  one time:   history download ──► stats.nba.com (1946-47 to today) ──► database
   every day:  scheduled update ──► stats.nba.com (current season)    ──► database
 ```
 
@@ -119,18 +119,18 @@ On your laptop:
 
 **Phase 2: Load the data**
 - 2a: Convert NBA's data into our tables; loading twice changes nothing. Handles neutral-site games and team renames. Done.
-- 2b: History download command for every season from 2000-01, regular season and playoffs, into the **local database for now**. If it's interrupted, just rerun it. Done: 27 seasons in about 2 minutes. Copying to Neon happens when we deploy (Phase 8).
-- 2c: Season-totals view, and spot-checks against well-known real numbers.
+- 2b: History download command for every season from 1946-47 (regular season, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens when we deploy (Phase 8).
+- 2c: Season-totals view, and spot-checks against well-known real numbers. Also work out from the data when each stat became fully recorded (e.g. blocks from 1973-74) and store that in a small table, for the AI's "tracked since" rules.
 
 **Phase 3: Safety checker (no AI yet)**
 - The SQL checker, with many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
 
 **Phase 4: Connect the AI**
 - 4a: Build the AI instructions and call Gemini. A command-line version comes first.
-- 4b: Retry on errors, refuse when needed, log token usage and cost.
+- 4b: Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
 
 **Phase 5: Accuracy test**
-- About 30 questions with known correct answers, plus about 6 the app *should refuse*.
+- About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
 - They run against a frozen copy of a few seasons, so the correct answers never change. The output is a score like "27/30".
 - It runs only when triggered by hand, to save the free AI allowance.
 
@@ -155,6 +155,7 @@ On your laptop:
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
 - **The one-sentence AI summary is off by default.** It would double AI usage per question.
 - **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in Phase 2c and Phase 9.
+- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (Phases 2c, 4, 5) and 305 MB instead of 140 MB, about 60% of Neon's free 0.5 GB. Check the real limit in Phase 8.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
 
 ## How we'll know it works

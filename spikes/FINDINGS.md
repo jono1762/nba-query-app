@@ -53,3 +53,56 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
   semifinals (2024-12-14), and Paris (IND-SAS, January 2025).
   - Earlier international games are listed with a normal home team, so they
     aren't flagged.
+
+## Full history from 1946-47, plus play-in (2026-11-20)
+Decision: load every season from 1946-47 (the BAA's first season) and add play-in
+games. The 2000-01 to now load above was the first step.
+
+- **Load:** 81 seasons × regular season, play-in (from 2019-20) and playoffs. That's
+  170 requests in about 5 minutes from an empty database.
+- **Result:** 1,487,560 player-game rows, 73,392 games (37 play-in), 5,159
+  players, 45 franchises. The database is **305 MB**, about 60% of Neon's free 0.5 GB.
+- **Missing stats are NULL in the source**, never 0, with one exception: early
+  seasons report `MIN = 0` for every player. How complete each stat is, by season
+  (share of rows with a value):
+
+  | Season | Minutes | Rebounds | Assists | Steals | Blocks | Turnovers | 3PA |
+  |---|---|---|---|---|---|---|---|
+  | 1946-47 | 0% | 0% | 2% | 0% | 0% | 0% | 0% |
+  | 1960-61 | 60% | 69% | 38% | 0% | 0% | 0% | 0% |
+  | 1973-74 | 88% | 92% | 92% | 28% | 31% | 0% | 0% |
+  | 1979-80 | 99% | 99% | 98% | 72% | 82% | 65% | 85% |
+  | 1985-86 | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+
+  Coverage rises gradually and is often partial within a season. Phase 2c will
+  compute exact "fully recorded from" seasons per stat.
+
+- **Errors in old box scores, and how they're handled** (each found in the real
+  data and covered by a test):
+  - *Attempts lower than makes* (a 1946-47 player with 1 FT made, 0 attempted):
+    the attempts become NULL.
+  - *W/L missing on a single player row* (10 rows in 1959-60): filled in from
+    teammates.
+  - *A couple of rows with the wrong home/away label* (1967-68 SFW at SDR: 10 rows
+    say away, 2 say home): majority vote per team.
+  - *A player listed on both teams in one game:* 11 ghost rows dropped across
+    history. Examples:
+    - Bob Cousy 1951-52: 13 pts for BOS, plus an empty BAL copy with a stray FT
+      attempt.
+    - John Shumate 1977-78: the full box score for DET is kept, the partial BUF
+      copy dropped.
+  - *Genuinely playing for both teams:* the **protested 76ers-Nets game of
+    1978-11-08** was finished months later, after a trade, so Eric Money, Ralph
+    Simpson and Harvey Catchings have real stats for both teams. All their rows
+    are kept, and the table key includes the team for this reason.
+    - An earlier rule ("a 0-point copy beside a scoring copy is a ghost") would
+      have dropped Simpson's and Catchings' real rows. The fix was to count a copy
+      as real if it has points, makes or **minutes**.
+- **Known, deliberately kept source anomaly:** Greg Jackson, 1975-03-19 NYK at
+  PHX. The source shows 8 pts for NYK (no minutes) and 4 minutes for PHX (no
+  points). He'd been traded to PHX earlier that season, so the 8 points probably
+  belong to his PHX row, but nothing in the data proves it. Both rows are kept as
+  the source has them.
+- **Neutral-site games:** still 11, all from 2024-25 on. Earlier neutral-venue
+  games, common in the 1950s-60s, are listed with a normal home team in the
+  source, so they aren't flagged.

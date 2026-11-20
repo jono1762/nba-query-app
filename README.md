@@ -27,7 +27,7 @@ Data comes from stats.nba.com, which blocks cloud servers, so run this from a ho
 connection. A whole season is one request. Reruns are safe: unchanged rows are skipped.
 
 ```bash
-uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 2000-01 to now (~2 min)
+uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~5 min)
 uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27  # just the current season
 uv run --env-file .env python -m nba_query_app.ingest.backfill --help          # all options
 ```
@@ -36,7 +36,8 @@ uv run --env-file .env python -m nba_query_app.ingest.backfill --help          #
 
 - `migrations/` holds numbered SQL files, applied in order, once each.
 - `nba` schema: `teams`, `players`, `games`, `player_game_stats` (one row per
-  player per game), and `meta` (data version and newest game date).
+  player per team per game, from 1946-47), and `meta` (data version and newest game date).
+  Stats that weren't recorded in early seasons are NULL ("not recorded"), not 0.
 - Roles (permission groups, no passwords):
   - `nba_reader`: read-only. All LLM-written SQL runs as a member of this role.
   - `nba_ingest`: can load data, but not change table structure.
