@@ -6,6 +6,7 @@ import pytest
 from nba_query_app.db.migrate import apply_migrations
 
 EXPECTED_TABLES = {"teams", "players", "games", "player_game_stats", "meta"}
+EXPECTED_VIEWS = {"player_season_stats", "stat_coverage", "stat_tracked_since"}
 
 
 @pytest.fixture
@@ -26,9 +27,17 @@ def insert_sample_game(conn: psycopg.Connection) -> None:
 
 def test_all_tables_exist(migrated: psycopg.Connection) -> None:
     rows = migrated.execute(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'nba'"
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'nba' AND table_type = 'BASE TABLE'"
     ).fetchall()
     assert {name for (name,) in rows} == EXPECTED_TABLES
+
+
+def test_all_views_exist(migrated: psycopg.Connection) -> None:
+    rows = migrated.execute(
+        "SELECT table_name FROM information_schema.views WHERE table_schema = 'nba'"
+    ).fetchall()
+    assert {name for (name,) in rows} == EXPECTED_VIEWS
 
 
 def test_meta_starts_with_one_row(migrated: psycopg.Connection) -> None:
