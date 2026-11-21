@@ -197,6 +197,12 @@ listed in `KNOWN_EXCEPTIONS` with the reason, so the report shows 0 unexplained.
 - **Cleanup rules, exact totals for the full history:** 11 ghost rows dropped, 2
   home/away labels outvoted, 127,544 zero-minute rows made "not recorded", 115
   impossible attempt values made "not recorded", 25 missing W/L values filled in.
+- **Spot-checks against official totals:** 8 of 11 match exactly, e.g. Kareem's
+  38,387 and Jordan's 32,292 career points, Stockton's 15,806 assists and 3,265
+  steals, Wilt's 4,029 points in 1961-62, Curry's 402 threes in 2015-16, Eaton's 456
+  blocks in 1984-85. Three fall slightly short in the source's game logs: Wilt's
+  career points (31,417 vs 31,419), Hakeem's career blocks (3,825 vs 3,830) and
+  Wilt's 1960-61 rebounds (2,073 vs 2,149). Kept as they are.
 - **Clean:** no 3-pointers before 1979-80, no play-in or Cup games before they
   existed, no single-game value above an all-time record (every record holder
   matches: Wilt's 100 points and 55 rebounds, Skiles' 30 assists, and so on), and

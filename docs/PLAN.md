@@ -27,8 +27,8 @@ Decisions:
 | 4 | Convert NBA data into table rows; safe reloads | Done |
 | 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
-| 7 | Season totals and data-quality checks | In progress: views, cleanup counts and quality checks done, findings documented; spot-checks next |
-| 8 | SQL safety checker | |
+| 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
+| 8 | SQL safety checker | Next |
 | 9 | Connect Gemini (command-line first) | |
 | 10 | Retries, refusals, cost logging | |
 | 11 | Accuracy test | |
@@ -123,9 +123,9 @@ On your laptop:
 
 **6. NBA Cup rounds.** Each Cup game is tagged as group, quarterfinal, semifinal or final. Done.
 
-**7. Season totals and data quality.**
+**7. Season totals and data quality.** Done.
 - Season-totals view, and spot-checks against well-known real numbers.
-- **"Tracked since" table**, calculated from the data rather than typed-in dates (e.g. "first season where ≥ 99% of rows have blocks"). It drives the AI's refuse-or-caveat rules. Coverage ramps up gradually and unevenly, so these are *not* hard database rules.
+- **"Tracked since" table**, calculated from the data rather than typed-in dates (the first season from which every season has the stat in ≥ 98% of rows; 99% was too strict, see `spikes/FINDINGS.md`). It drives the AI's refuse-or-caveat rules. Coverage ramps up gradually and unevenly, so these are *not* hard database rules.
 - **Data-quality checks** (a script that runs after loading, plus tests). They report violations for a person to look at; they don't block the load. They flag:
   - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
   - *Stats that disappear* after being fully recorded.

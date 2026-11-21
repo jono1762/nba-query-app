@@ -48,6 +48,22 @@ SINGLE_GAME_RECORDS = {
     "minutes": 69,  # Dale Ellis, 1989-11-09 (five overtimes)
 }
 
+# Well-known official regular-season figures, to spot-check the data against:
+# (player_id, name, season or None for the whole career, stat, official value).
+KNOWN_TOTALS = [
+    (76003, "Kareem Abdul-Jabbar", None, "pts", 38387),
+    (893, "Michael Jordan", None, "pts", 32292),
+    (76375, "Wilt Chamberlain", None, "pts", 31419),
+    (304, "John Stockton", None, "ast", 15806),
+    (304, "John Stockton", None, "stl", 3265),
+    (165, "Hakeem Olajuwon", None, "blk", 3830),
+    (76375, "Wilt Chamberlain", "1961-62", "pts", 4029),
+    (76375, "Wilt Chamberlain", "1960-61", "reb", 2149),
+    (977, "Kobe Bryant", "2005-06", "pts", 2832),
+    (201939, "Stephen Curry", "2015-16", "fg3m", 402),
+    (76631, "Mark Eaton", "1984-85", "blk", 456),
+]
+
 
 @dataclass(frozen=True)
 class Check:
@@ -88,6 +104,27 @@ def _extreme_value_query() -> str:
                p.full_name || ': ' || x.value || ' ' || x.stat || ' (record ' || x.record || ')'
         FROM ({" UNION ALL ".join(parts)}) x
         JOIN nba.players p USING (player_id)
+        ORDER BY 1
+    """
+
+
+def _known_totals_query() -> str:
+    """Add up the game rows for each KNOWN_TOTALS entry and report the ones that differ.
+
+    Entries with no rows at all (player or season not loaded) are skipped.
+    """
+    parts = [
+        f"SELECT '{name}' || ' ' || {f"'{season}'" if season else "'career'"} || ' ' || '{stat}'"
+        f" AS key, sum(s.{stat}) AS actual, {expected} AS expected "
+        f"FROM nba.player_game_stats s JOIN nba.games g USING (game_id) "
+        f"WHERE s.player_id = {player_id} AND g.season_type = 'Regular Season'"
+        + (f" AND g.season = '{season}'" if season else "")
+        for player_id, name, season, stat, expected in KNOWN_TOTALS
+    ]
+    return f"""
+        SELECT key, 'data has ' || actual || ', official ' || expected
+        FROM ({" UNION ALL ".join(parts)}) x
+        WHERE actual <> expected
         ORDER BY 1
     """
 
@@ -281,6 +318,12 @@ CHECKS = [
         """,
     ),
     Check(
+        "known_totals",
+        "well-known official regular-season totals (e.g. Kareem's 38,387 career points) "
+        "that the game rows don't add up to",
+        _known_totals_query(),
+    ),
+    Check(
         "cup_final_teams",
         "an NBA Cup final team that didn't win an NBA Cup semifinal that season",
         """
@@ -360,6 +403,12 @@ KNOWN_EXCEPTIONS = [
         game_ids_in("2005-06", "2006-07") + r" \d+",
         "wrong minutes in the source's season log (the game's box score has the right "
         "ones, e.g. Michael Redd 20 instead of 40:00 on 0020600111)",
+    ),
+    KnownException(
+        "known_totals",
+        r"Wilt Chamberlain career pts|Hakeem Olajuwon career blk|Wilt Chamberlain 1960-61 reb",
+        "the source's game logs fall slightly short of the official totals (2 points, 5 "
+        "blocks, 76 rebounds); not investigated game by game, kept as they are",
     ),
     KnownException(
         "uneven_games_per_team",

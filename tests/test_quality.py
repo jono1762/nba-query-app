@@ -264,3 +264,14 @@ def test_team_minutes_skip_teams_with_no_minutes_and_note_partial_gaps(
         add_clean_game(nba_data, f"g{i}")
     expected = [("g1 1", "2000-01 T1: 192 of 240 minutes (1 player(s) without minutes)")]
     assert violations(nba_data, "team_minutes_short") == expected
+
+
+def test_known_totals(nba_data: NbaData) -> None:
+    nba_data.game("g1", "2015-16")
+    nba_data.stats("g1", 201939, 1, won=True, pts=30, fgm=10, fg3m=10)  # Curry: 402 officially
+    nba_data.game("g2", "1984-85")
+    nba_data.stats("g2", 76631, 1, won=True, blk=456)  # Mark Eaton: matches
+
+    # Every other known player isn't loaded here, so it's skipped.
+    expected = [("Stephen Curry 2015-16 fg3m", "data has 10, official 402")]
+    assert violations(nba_data, "known_totals") == expected
