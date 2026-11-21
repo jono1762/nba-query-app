@@ -123,3 +123,20 @@ def test_season_types_only_requested_once_they_existed(migrated: psycopg.Connect
         ("2023-24", "Play-In"),
         ("2023-24", "Playoffs"),
     ]
+
+
+def test_cup_request_tags_regular_season_games_with_their_round(
+    migrated: psycopg.Connection,
+) -> None:
+    # The Cup ("IST") response repeats regular-season games; here, the fixture's two games.
+    def fetch(season, season_type):
+        if season_type in ("Regular Season", "NBA Cup Final"):
+            return json.loads(FIXTURE.read_text())
+        return empty_response()
+
+    run(migrated, ["2026-27"], ["Regular Season", "NBA Cup Final"], fetch)
+
+    rounds = migrated.execute("SELECT game_id, nba_cup_round FROM nba.games ORDER BY 1").fetchall()
+    assert rounds == [("0022600001", "Group"), ("0022600002", "Group")]
+    # Only the final's rows are loaded as box scores, so nothing was added twice.
+    assert migrated.execute("SELECT count(*) FROM nba.player_game_stats").fetchone() == (41,)

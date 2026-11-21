@@ -75,22 +75,3 @@ def test_play_in_uses_the_api_spelling(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert seen["season_type_all_star"] == "PlayIn"
     assert seen["player_or_team_abbreviation"] == "P"
-
-
-def test_cup_final_keeps_only_the_championship_game() -> None:
-    # "IST" returns every Cup game; only SEASON_ID prefix 6 is the final.
-    ist = {
-        "resultSets": [
-            {
-                "headers": ["SEASON_ID", "GAME_ID"],
-                "rowSet": [
-                    ["22024", "0022400001"],
-                    ["62024", "0062400001"],
-                    ["22024", "0022400002"],
-                ],
-            }
-        ]
-    }
-    fake = FakeRequests(ist)
-    result = fetch_league_game_log("2024-25", "NBA Cup Final", request=fake, sleep=lambda s: None)
-    assert result["resultSets"][0]["rowSet"] == [["62024", "0062400001"]]
