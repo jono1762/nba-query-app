@@ -299,6 +299,11 @@ def test_consistent_attempts_are_kept(response: dict) -> None:
 
 
 # --- Player listed on both teams in one game ---------------------------------
+# These tests call the duplicate helper directly on minimal rows. The helper only
+# compares team IDs, so placeholder teams A and B are used. Comments name the real
+# case each test is based on.
+
+TEAM_A, TEAM_B = 1, 2
 
 
 def raw_row(game_id: str, team_id: int, day: str, pts: int = 0, player_id: int = 7) -> dict:
@@ -310,61 +315,68 @@ def raw_row(game_id: str, team_id: int, day: str, pts: int = 0, player_id: int =
 
 
 def test_copy_with_real_stats_wins() -> None:
-    real, empty = raw_row("g1", BOS, "1951-12-01", pts=13), raw_row("g1", DET, "1951-12-01")
+    real = raw_row("g1", TEAM_A, "1951-12-01", pts=13)
+    empty = raw_row("g1", TEAM_B, "1951-12-01")
     assert _resolve_duplicate_player_rows([empty, real]) == [real]
 
 
 def test_copy_with_points_beats_copy_with_only_stray_stats() -> None:
-    # Real example: Bob Cousy 1951-52, 13 pts for BOS; for BAL 0 pts but 1 FT attempted.
-    real = raw_row("g1", BOS, "1951-12-01", pts=13)
-    ghost = raw_row("g1", DET, "1951-12-01")
+    # Bob Cousy 1951-52: 13 pts for BOS; for BAL 0 pts but 1 FT attempted.
+    real = raw_row("g1", TEAM_A, "1951-12-01", pts=13)
+    ghost = raw_row("g1", TEAM_B, "1951-12-01")
     ghost["FTA"] = 1
     assert _resolve_duplicate_player_rows([ghost, real]) == [real]
 
 
 def test_identical_copies_use_team_from_nearest_other_game() -> None:
-    chi = raw_row("g2", BOS, "1979-12-05", pts=17)
-    hou = raw_row("g2", DET, "1979-12-05", pts=17)
-    earlier = raw_row("g1", DET, "1979-12-01", pts=10)  # 4 days before: on DET
-    later = raw_row("g3", BOS, "1980-03-01", pts=8)  # months later: on BOS
+    # Like Dwight Jones 1979-80 (traded between HOU and CHI that season): the same
+    # 17-point line listed for both teams. The nearest other game decides.
+    copy_a = raw_row("g2", TEAM_A, "1979-12-05", pts=17)
+    copy_b = raw_row("g2", TEAM_B, "1979-12-05", pts=17)
+    days_before = raw_row("g1", TEAM_B, "1979-12-01", pts=10)  # 4 days before: team B
+    months_later = raw_row("g3", TEAM_A, "1980-03-01", pts=8)  # months later: team A
 
-    result = _resolve_duplicate_player_rows([chi, hou, earlier, later])
-    assert hou in result and chi not in result
+    result = _resolve_duplicate_player_rows([copy_a, copy_b, days_before, months_later])
+    assert copy_b in result and copy_a not in result
 
 
 def test_undecidable_all_zero_copies_are_dropped() -> None:
-    # Real example: John Murphy 1946-47, all-zero rows for both teams, no other games.
-    rows = [raw_row("g1", BOS, "1946-12-01"), raw_row("g1", DET, "1946-12-01")]
+    # John Murphy 1946-47: all-zero rows for both teams and no other games.
+    rows = [raw_row("g1", TEAM_A, "1946-12-01"), raw_row("g1", TEAM_B, "1946-12-01")]
     assert _resolve_duplicate_player_rows(rows) == []
 
 
 def test_undecidable_copies_with_stats_are_an_error() -> None:
-    rows = [raw_row("g1", BOS, "1979-12-05", pts=17), raw_row("g1", DET, "1979-12-05", pts=17)]
+    rows = [
+        raw_row("g1", TEAM_A, "1979-12-05", pts=17),
+        raw_row("g1", TEAM_B, "1979-12-05", pts=17),
+    ]
     with pytest.raises(NormalizeError, match="Can't tell which team"):
         _resolve_duplicate_player_rows(rows)
 
 
 def test_different_scoring_for_each_team_is_genuine_and_both_kept() -> None:
-    # Real example: Eric Money in the protested 76ers-Nets game of 1978-11-08,
-    # finished after his trade: 23 pts for NJN and 4 pts for PHL.
-    nets, sixers = raw_row("g1", BOS, "1978-11-08", pts=23), raw_row("g1", DET, "1978-11-08", pts=4)
-    assert _resolve_duplicate_player_rows([nets, sixers]) == [nets, sixers]
+    # Eric Money in the protested 76ers-Nets game of 1978-11-08, finished after
+    # his trade: 23 pts for NJN and 4 pts for PHL.
+    first_team = raw_row("g1", TEAM_A, "1978-11-08", pts=23)
+    second_team = raw_row("g1", TEAM_B, "1978-11-08", pts=4)
+    assert _resolve_duplicate_player_rows([first_team, second_team]) == [first_team, second_team]
 
 
 def test_zero_point_copy_with_minutes_is_genuine() -> None:
-    # Real example: Ralph Simpson in the same 1978 game: 8 pts for PHL, and for NJN
-    # 2 minutes and 2 assists but 0 points. Both are real.
-    sixers = raw_row("g1", DET, "1978-11-08", pts=8)
-    nets = raw_row("g1", BOS, "1978-11-08")
-    nets.update({"MIN": 2, "AST": 2})
-    assert _resolve_duplicate_player_rows([nets, sixers]) == [nets, sixers]
+    # Ralph Simpson in the same 1978 game: 8 pts for PHL, and for NJN 2 minutes
+    # and 2 assists but 0 points. Both are real.
+    scored = raw_row("g1", TEAM_A, "1978-11-08", pts=8)
+    minutes_only = raw_row("g1", TEAM_B, "1978-11-08")
+    minutes_only.update({"MIN": 2, "AST": 2})
+    assert _resolve_duplicate_player_rows([minutes_only, scored]) == [minutes_only, scored]
 
 
 def test_most_complete_copy_of_one_performance_wins() -> None:
-    # Real example: John Shumate 1977-78, 16 pts for both DET (full box score) and BUF (partial).
-    full = raw_row("g1", DET, "1977-12-30", pts=16)
+    # John Shumate 1977-78: 16 pts for both DET (full box score) and BUF (partial).
+    full = raw_row("g1", TEAM_A, "1977-12-30", pts=16)
     full.update({"MIN": 38, "FGA": 7, "REB": 7})
-    partial = raw_row("g1", BOS, "1977-12-30", pts=16)
+    partial = raw_row("g1", TEAM_B, "1977-12-30", pts=16)
     assert _resolve_duplicate_player_rows([partial, full]) == [full]
 
 
