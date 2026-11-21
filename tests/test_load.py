@@ -160,3 +160,20 @@ def test_neutral_site_game_with_a_home_team_is_rejected(
     half_neutral = dataclasses.replace(batch.games[0], neutral_site=True)  # still has home team
     with pytest.raises(psycopg.errors.CheckViolation):
         load_batch(ingest, dataclasses.replace(batch, games=[half_neutral], stats=[]))
+
+
+def test_player_can_have_rows_for_both_teams_in_one_game(
+    ingest: psycopg.Connection, batch: Batch
+) -> None:
+    # Eric Money, 1978-11-08: genuine stats for both teams in one (protested) game.
+    first = batch.stats[0]
+    other_team = dataclasses.replace(
+        first, team_id=first.opponent_team_id, opponent_team_id=first.team_id, pts=4
+    )
+    load_batch(ingest, dataclasses.replace(batch, stats=[*batch.stats, other_team]))
+
+    count = ingest.execute(
+        "SELECT count(*) FROM nba.player_game_stats WHERE game_id = %s AND player_id = %s",
+        (first.game_id, first.player_id),
+    ).fetchone()[0]
+    assert count == 2

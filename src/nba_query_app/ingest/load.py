@@ -65,7 +65,7 @@ UPSERT_TEAMS = _upsert_sql("teams", Team, ("team_id",), only_if_newer=True)
 UPSERT_PLAYERS = _upsert_sql("players", Player, ("player_id",), only_if_newer=True)
 UPSERT_GAMES = _upsert_sql("games", Game, ("game_id",), only_if_newer=False)
 UPSERT_STATS = _upsert_sql(
-    "player_game_stats", PlayerGameStats, ("game_id", "player_id"), only_if_newer=False
+    "player_game_stats", PlayerGameStats, ("game_id", "player_id", "team_id"), only_if_newer=False
 )
 
 # Bump the version only when something changed, so caches are cleared only when needed.

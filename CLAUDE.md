@@ -9,10 +9,9 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com normalizer and loader
+- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB.
 
 Not built yet:
-- history download CLI
 - SQL safety checker
 - LLM pipeline and accuracy eval
 - API and frontend
@@ -32,7 +31,11 @@ uv run --env-file .env python -m nba_query_app.db.migrate   # apply migrations
 uv run ruff check . && uv run ruff format --check .    # lint + format check (CI runs both)
 uv run --env-file .env pytest                          # all tests
 uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated   # one test
+
+uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
 ```
+
+The backfill makes real requests to stats.nba.com (about 170 for the full history, roughly 5 minutes). Run it only when data is actually needed.
 
 Without `DATABASE_URL`, database tests are **skipped**. With `REQUIRE_DATABASE=1` (set in CI) they **fail** instead.
 
@@ -40,9 +43,11 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 
 ## Architecture
 
-**Data flow.** stats.nba.com `LeagueGameLog` (player mode) returns a whole season in one request.
+**Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch → normalize → load. Each one commits on its own, so a crash keeps earlier seasons.
+- `ingest/fetch.py` calls stats.nba.com `LeagueGameLog` (player mode), which returns a whole season in one request. It retries with increasing waits and raises `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats`.
 - `ingest/load.py` upserts a `Batch` in one transaction.
+- Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.
 
@@ -53,11 +58,23 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Team and player names are updated only when `name_as_of` is the same date or newer, so loading an old season can't overwrite a current name.
 
 **Data quirks handled in `normalize.py`** (details in `spikes/FINDINGS.md`):
-- `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs; anything else is rejected), then the start year. It becomes `'2026-27'`.
+- **Official, competitive games only** (a deliberate product decision, see `docs/PLAN.md`): exhibitions such as the All-Star game and preseason are excluded.
+- `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in, 6 = NBA Cup final; anything else, including 1 = preseason and 3 = All-Star, is rejected), then the start year. It becomes `'2026-27'`.
+  - The API calls play-in `PlayIn` (from 2019-20); we store it as `Play-In`.
+  - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. `fetch.py` keeps only the prefix-6 final, because the other Cup games are regular-season games we already have.
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
+- **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
+  - Early seasons report `MIN = 0` for everyone, so a game where *every* player has 0 minutes becomes NULL minutes. A single 0 is real (under 30 seconds).
+  - Attempts lower than makes (an impossible value in old box scores) become NULL attempts.
+- A W/L missing on one player row is filled in from teammates, or else from the opponent. Every game must end with exactly one winner and one loser (no ties).
+- Home/away per team is a majority vote of its rows. A few old rows are mislabelled.
+- **A player listed on both teams in one game** (`_resolve_duplicate_player_rows`):
+  - Ghost copies are dropped. A copy is "real" if it has points, makes or minutes. Copies with identical scoring collapse to the most complete one.
+  - Real copies with different scoring are all kept. That's the 1978-11-08 protested 76ers–Nets game, finished after a trade, so the table key is `(game_id, player_id, team_id)`.
 - `MIN` is a whole number. Shooting percentages from the source are ignored, since they can be derived.
 - Bad input raises `NormalizeError` rather than loading partial data.
+- When data trips a new rule, dry-run fetch + normalize over all seasons (no DB) to find every case at once, then look at the actual rows before writing a rule. Several "obvious" rules here turned out to drop real stats.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 
