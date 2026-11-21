@@ -80,7 +80,8 @@ games.
   - *Attempts lower than makes* (a 1946-47 player with 1 FT made, 0 attempted):
     the attempts become NULL.
     - Checked whether the column might mean *misses* instead. It doesn't:
-      - These rows are rare: at most 19 of about 6,000 per season, none after 1966-67.
+      - These rows are rare: 115 values in all, at most 19 of about 6,000 rows per
+        season, none after 1966-67.
       - The source's own percentage treats the value as attempts (Bob Feerick
         1947-48: 4 FT made, 1 attempted, shown as 400%).
       - League free-throw percentage only matches history under the attempts
@@ -88,10 +89,10 @@ games.
         historical figure is about 73%.
     - So they're recording errors. Some may be misses typed into the wrong
       column, but nothing proves which, so no value is guessed.
-  - *W/L missing on a single player row* (10 rows in 1959-60): filled in from
-    teammates.
+  - *W/L missing on a single player row* (25 rows, all in 1959-60 and 1960-61):
+    filled in from teammates.
   - *A couple of rows with the wrong home/away label* (1967-68 SFW at SDR: 10 rows
-    say away, 2 say home): majority vote per team.
+    say away, 2 say home; those 2 are the only ones in history): majority vote per team.
   - *A player listed on both teams in one game:* 11 ghost rows dropped across
     history. Examples:
     - Bob Cousy 1951-52: 13 pts for BOS, plus an empty BAL copy with a stray FT
@@ -187,3 +188,57 @@ every season from then on has the stat in at least 98% of player rows.
   values years before the league started counting them (first recorded 1962-63 to
   1970-71, against official starts of 1973-74 and 1977-78). That's why their "first
   recorded" season is so early.
+
+## Data-quality checks (2026-11-21)
+The first full run of `nba_query_app.quality` over the whole history, after the
+reload with the minutes rule above. Every violation was looked at. All are now
+listed in `KNOWN_EXCEPTIONS` with the reason, so the report shows 0 unexplained.
+
+- **Cleanup rules, exact totals for the full history:** 11 ghost rows dropped, 2
+  home/away labels outvoted, 127,544 zero-minute rows made "not recorded", 115
+  impossible attempt values made "not recorded", 25 missing W/L values filled in.
+- **Clean:** no 3-pointers before 1979-80, no play-in or Cup games before they
+  existed, no single-game value above an all-time record (every record holder
+  matches: Wilt's 100 points and 55 rebounds, Skiles' 30 assists, and so on), and
+  every NBA Cup finalist won its semifinal.
+- **Players the source lost.** stats.nba.com's season log is missing some players
+  entirely. In the game's box score their line is there (minutes, points…) but with
+  no player ID or name, so the season log drops it:
+  - Loy Vaught, Clippers, every game from 1990-91 to 1995-96 (about 395 games; he's
+    present from 1996-97). His own game log for those seasons is empty too.
+  - One Nets player in 1995-96 (about 55 games).
+  - A few other games from 1985-86 to 1996-97, probably the same cause (not
+    checked one by one).
+  - Found by team minutes: those teams' players add up to about 190-220 of 240
+    minutes. **Decision (2026-11-21): document now, repair later.** A repair would
+    fetch those games' box scores and attribute a nameless line only where it can be
+    proven (e.g. NBA.com's season totals for the player match).
+- **Wrong minutes in 2005-06 and 2006-07** (about 70 team-games): the season log
+  shows e.g. Michael Redd with 20 minutes on 0020600111, where the box score says
+  40:00. **Decision: document now; fix together with the repair above**, since both
+  need box scores.
+- **Player points that don't match the team score (1946-47 to 1989-90).** 262 games
+  where the winner's player rows add up to fewer points than the loser's. Checked
+  against the source's team-level log for 1980-81: the W/L is right and the player
+  rows are off (e.g. 0028000198: Atlanta scored 88, but its player rows add up to
+  108). Nothing shows which row is wrong, so the source values are kept.
+- **Points that don't add up** (points ≠ 2 × 2-pointers + 3 × 3-pointers + free
+  throws): 71 rows, all from 1946-47 to 1963-64. Kept as in the source.
+- **3-pointers above field goals:** 4 rows in 1985-86 and 1987-88. Kept.
+- **Personal fouls** reached 98% in 1951-52 but then swung between 79% and 99%
+  until 1980-81, so they count as fully recorded only from then.
+- **Games per team:** every team played the same number of regular-season games
+  each season except:
+  - tiebreaker games counted as regular season: 1946-47 (Chicago–St. Louis on
+    1947-03-31, after the last scheduled day) and 1956-57 (St. Louis against Fort
+    Wayne and Minneapolis);
+  - uneven early schedules: 1949-50 (17 teams after the NBL merger), 1950-51 (the
+    Washington Capitols folded after 35 games), 1952-53 and 1953-54 (69 to 72 games);
+  - 2012-13: Boston–Indiana cancelled after the Boston Marathon bombing;
+  - 2019-20: COVID-19.
+  - Seasons with fewer than 82 games since 1967-68: the lockouts (1998-99: 50,
+    2011-12: 66) and COVID-19 (2019-20, 2020-21: 72).
+- **Possible next check:** the source's team-level log (one request per season)
+  has each team's final score. Storing scores would catch every game whose player
+  rows don't add up, not only the ones where that flips the winner, and would let
+  the AI answer questions about final scores.

@@ -27,7 +27,7 @@ Decisions:
 | 4 | Convert NBA data into table rows; safe reloads | Done |
 | 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
-| 7 | Season totals and data-quality checks | In progress: views, cleanup-rule counts and data-quality checks built; investigating what the checks found |
+| 7 | Season totals and data-quality checks | In progress: views, cleanup counts and quality checks done, findings documented; spot-checks next |
 | 8 | SQL safety checker | |
 | 9 | Connect Gemini (command-line first) | |
 | 10 | Retries, refusals, cost logging | |
@@ -130,12 +130,15 @@ On your laptop:
   - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
   - *Stats that disappear* after being fully recorded.
   - *Implausible numbers:* a player's points ≠ 2 × (FGM − FG3M) + 3 × FG3M + FTM where all are recorded (FGM includes 3-pointers, so 2-pointers are FGM − FG3M), extreme single-game values.
-  - *Team totals that don't add up* within a game, and any game without exactly one winner and one loser (also enforced when loading).
+  - *Team totals that don't add up* within a game: a winner whose player rows add up to fewer points, team minutes well short of the game length (a player row missing, or wrong minutes), and any game without exactly one winner and one loser (also enforced when loading).
   - *Games per team per season*, the closest we can get to proving no games are missing:
     - Count each team's regular-season games and compare with that season's schedule length (82 in modern seasons; it changed over history). In NBA Cup seasons every team should still have exactly 82, with the two finalists also having one "NBA Cup Final" game.
     - Report seasons where teams' counts differ. Some are real: early seasons with uneven schedules, the 2012-13 Celtics–Pacers game cancelled after the Boston Marathon bombing, and the COVID-shortened 2019-20. A small list of known exceptions keeps the report quiet for those, so anything else stands out.
 - **Count every time a cleanup rule fires** during loading (attempts made "not recorded", W/L filled in, home/away majority votes, ghost rows dropped), so the totals in `spikes/FINDINGS.md` are exact rather than only the cases that first caused errors.
 - If a check finds something, look at the actual rows and decide, as with the old box-score errors in step 5.
+- **Decided after the first run** (details in `spikes/FINDINGS.md`):
+  - A 0 in minutes means "not recorded" when the team's minutes fall well short of the game length (common before 1985).
+  - Players the source lost (e.g. Loy Vaught, Clippers 1990-96: the box score has his line but no player ID) and wrong minutes in some 2005-07 games are documented as known gaps. Repairing them from per-game box scores is possible later.
 
 **8. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
 

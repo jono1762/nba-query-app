@@ -24,16 +24,16 @@ from datetime import date
 
 import psycopg
 
-from nba_query_app.seasons import season_for_date
+from nba_query_app.ingest.normalize import (
+    OVERTIME_TEAM_MINUTES,
+    REGULATION_TEAM_MINUTES,
+    TEAM_MINUTES_SHORTFALL,
+)
+from nba_query_app.seasons import season_for_date, season_start_year
 
 # Below this share of player rows, a stat counts as not fully recorded that season.
 # Must match the threshold in the nba.stat_tracked_since view (migration 010).
 FULLY_RECORDED_PCT = 98
-
-# A team's player minutes this far below the game length can't be rounding (each
-# player's minutes are rounded to a whole number, so at most about half a minute
-# each): a player row is missing, or minutes are wrong.
-TEAM_MINUTES_SHORTFALL = 15
 
 # The highest single-game values in NBA history (regular season and playoffs).
 # Anything above one of these is either a new record or a data error.
@@ -197,27 +197,37 @@ CHECKS = [
     Check(
         "team_minutes_short",
         f"a team's player minutes in a game fall {TEAM_MINUTES_SHORTFALL}+ short of the game "
-        "length (240, plus 25 per overtime): usually a player row missing from the source",
-        # Game length comes from the team with more minutes. Minutes are rounded to
-        # whole numbers per player, so a few minutes' shortfall is just rounding.
+        f"length ({REGULATION_TEAM_MINUTES}, plus {OVERTIME_TEAM_MINUTES} per overtime), in "
+        "seasons where minutes are fully recorded: a player row missing from the source, "
+        "or wrong minutes",
+        # Game length comes from the team with more minutes (as in normalize.py).
+        # Minutes are rounded to whole numbers per player, so a few minutes' shortfall
+        # is just rounding. Teams with no minutes recorded at all are skipped; a
+        # player without recorded minutes counts as 0 and is noted in the detail.
         f"""
         WITH teams AS (
-            SELECT game_id, team_id, sum(minutes) AS minutes,
-                   count(*) FILTER (WHERE minutes = 0 AND pts > 0) AS scored_in_zero
-            FROM nba.player_game_stats
-            GROUP BY game_id, team_id
-            HAVING count(minutes) = count(*)
+            SELECT s.game_id, s.team_id, sum(s.minutes) AS minutes,
+                   count(*) - count(s.minutes) AS unrecorded
+            FROM nba.player_game_stats s
+            JOIN nba.games g USING (game_id)
+            WHERE g.season >= (
+                SELECT tracked_since FROM nba.stat_tracked_since WHERE stat = 'minutes'
+            )
+            GROUP BY s.game_id, s.team_id
+            HAVING count(s.minutes) > 0
         ),
         games AS (
             SELECT game_id,
-                   240 + 25 * greatest(0, round((max(minutes) - 240) / 25.0)) AS length
-            FROM teams GROUP BY game_id HAVING count(*) = 2
+                   {REGULATION_TEAM_MINUTES} + {OVERTIME_TEAM_MINUTES} * greatest(0, round(
+                       (max(minutes) - {REGULATION_TEAM_MINUTES}) / {OVERTIME_TEAM_MINUTES}.0
+                   )) AS length
+            FROM teams GROUP BY game_id
         )
         SELECT t.game_id || ' ' || t.team_id,
                g.season || ' ' || tm.abbreviation || ': ' || t.minutes || ' of '
                    || gl.length || ' minutes'
-                   || CASE WHEN t.scored_in_zero > 0
-                           THEN ' (' || t.scored_in_zero || ' scorer(s) with 0 minutes)'
+                   || CASE WHEN t.unrecorded > 0
+                           THEN ' (' || t.unrecorded || ' player(s) without minutes)'
                            ELSE '' END
         FROM teams t
         JOIN games gl USING (game_id)
@@ -291,9 +301,100 @@ CHECKS = [
     ),
 ]
 
+
+def game_ids_in(first_season: str, last_season: str) -> str:
+    """A regex matching game IDs from these seasons: the ID's 4th-5th digits are the
+    season's start year, e.g. 0024600028 is from 1946-47."""
+    years = range(season_start_year(first_season), season_start_year(last_season) + 1)
+    return r"00\d(?:" + "|".join(f"{year % 100:02d}" for year in years) + r")\d{5}"
+
+
+LAC, BKN = 1610612746, 1610612751
+
 # Violations that were looked at and are genuinely in the source data (or genuinely
 # happened). Each needs a reason. See spikes/FINDINGS.md for the investigation.
-KNOWN_EXCEPTIONS: list[KnownException] = []
+KNOWN_EXCEPTIONS = [
+    KnownException(
+        "stat_disappears",
+        r"pf (?:195[2-9]|19[67]\d)-\d\d",
+        "personal fouls were only partly recorded until 1980-81 (79% to 99% per season)",
+    ),
+    KnownException(
+        "points_dont_add_up",
+        game_ids_in("1946-47", "1963-64") + r" \d+",
+        "errors in old box scores (71 rows, none after 1963-64); nothing shows whether "
+        "the points or the makes are wrong, so the source values are kept",
+    ),
+    KnownException(
+        "parts_exceed_whole",
+        r"0028500003 76713|0028500175 892|0028700330 149|0028700330 76686",
+        "four 1985-88 box scores with more 3-pointers than field goals in the source",
+    ),
+    KnownException(
+        "result_doesnt_match_points",
+        game_ids_in("1946-47", "1989-90"),
+        "old box scores whose player rows don't add up to the team score: player points "
+        "are off (the source's team log confirms the W/L) or a player row is missing",
+    ),
+    KnownException(
+        "result_doesnt_match_points",
+        game_ids_in("1990-91", "1995-96"),
+        "games missing a player the source lost (no player ID in the box score), e.g. "
+        "Loy Vaught for the Clippers 1990-91 to 1995-96",
+    ),
+    KnownException(
+        "team_minutes_short",
+        game_ids_in("1976-77", "1985-86") + r" \d+",
+        "players without recorded minutes (e.g. Eddie Johnson, Kansas City 1984-85: points "
+        "but no minutes in 73 games) or rows missing, in box scores before 1986-87",
+    ),
+    KnownException(
+        "team_minutes_short",
+        game_ids_in("1986-87", "1996-97") + r" \d+",
+        "players the source lost (their box-score line has no player ID): Loy Vaught for "
+        "the Clippers 1990-91 to 1995-96, one Nets player in 1995-96, and probably the "
+        "same cause in the few other games (not checked one by one)",
+    ),
+    KnownException(
+        "team_minutes_short",
+        game_ids_in("2005-06", "2006-07") + r" \d+",
+        "wrong minutes in the source's season log (the game's box score has the right "
+        "ones, e.g. Michael Redd 20 instead of 40:00 on 0020600111)",
+    ),
+    KnownException(
+        "uneven_games_per_team",
+        r"1946-47|1956-57",
+        "tiebreaker games played after the schedule ended counted as regular season "
+        "(CHS-BOM 1947-03-31; STL-FTW and STL-MNL in March 1957)",
+    ),
+    KnownException(
+        "uneven_games_per_team",
+        r"1949-50|1950-51|1952-53|1953-54",
+        "uneven schedules in the early league: the 17-team 1949-50 after the NBL merger, "
+        "the Washington Capitols folding after 35 games in 1950-51, and 69 to 72 games "
+        "per team in 1952-54",
+    ),
+    KnownException(
+        "uneven_games_per_team",
+        r"2012-13",
+        "BOS-IND was cancelled after the Boston Marathon bombing and never made up",
+    ),
+    KnownException(
+        "uneven_games_per_team",
+        r"2019-20",
+        "COVID-19: the season was suspended and only 22 teams resumed play",
+    ),
+    KnownException(
+        "short_schedule",
+        r"1998-99|2011-12",
+        "lockout-shortened seasons (50 and 66 games)",
+    ),
+    KnownException(
+        "short_schedule",
+        r"2019-20|2020-21",
+        "COVID-19-shortened seasons (2020-21 was scheduled at 72 games)",
+    ),
+]
 
 
 def run_checks(

@@ -1,9 +1,11 @@
 """Data-quality checks, run against small hand-made games."""
 
+import re
+
 import pytest
 from conftest import NbaData
 
-from nba_query_app.quality import CHECKS, KnownException, report, run_checks
+from nba_query_app.quality import CHECKS, KnownException, game_ids_in, report, run_checks
 
 CURRENT = "2026-27"
 
@@ -236,3 +238,29 @@ def test_report_counts_unexplained_violations(nba_data: NbaData) -> None:
     assert lines[0].startswith("[1 found] three_pointers_before_the_line")
     assert lines[2].startswith("[ok] stat_disappears")
     assert lines[-1] == "Data-quality checks: 1 unexplained violation(s)."
+
+
+def test_game_ids_in_matches_only_those_seasons() -> None:
+    pattern = game_ids_in("1946-47", "1963-64")
+
+    assert re.fullmatch(pattern, "0024600028")  # 1946-47 regular season
+    assert re.fullmatch(pattern, "0046300001")  # 1963-64 playoffs
+    assert not re.fullmatch(pattern, "0026400001")  # 1964-65
+
+
+def test_team_minutes_skip_teams_with_no_minutes_and_note_partial_gaps(
+    nba_data: NbaData,
+) -> None:
+    add_clean_game(nba_data, "g1")
+    nba_data.conn.execute(
+        "UPDATE nba.player_game_stats SET minutes = NULL WHERE game_id = 'g1' AND team_id = 1"
+    )
+    assert keys(nba_data, "team_minutes_short") == []  # nothing recorded: a coverage gap
+
+    nba_data.conn.execute(
+        "UPDATE nba.player_game_stats SET minutes = 48 WHERE game_id = 'g1' AND player_id <> 100"
+    )
+    for i in range(2, 7):  # enough complete games that minutes count as fully recorded
+        add_clean_game(nba_data, f"g{i}")
+    expected = [("g1 1", "2000-01 T1: 192 of 240 minutes (1 player(s) without minutes)")]
+    assert violations(nba_data, "team_minutes_short") == expected
