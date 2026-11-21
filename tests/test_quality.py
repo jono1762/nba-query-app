@@ -21,12 +21,15 @@ def add_clean_game(
     season_type: str = "Regular Season",
     nba_cup_round: str | None = None,
 ) -> None:
-    """A plausible game: 5 players a side, 48 minutes each, the winner scoring more."""
+    """A plausible game: 5 players a side, 48 minutes each, the winner scoring more
+    (90-80), with matching team-log rows."""
     nba_data.game(game_id, season, season_type, home=home, away=away, nba_cup_round=nba_cup_round)
     for team, won in ((home, home_won), (away, not home_won)):
         for i in range(5):
             fgm = 9 if won else 8  # 2-pointers only: 18 or 16 points each
             nba_data.stats(game_id, team * 100 + i, team, won=won, pts=2 * fgm, fgm=fgm, minutes=48)
+        pts, opponent_pts = (90, 80) if won else (80, 90)
+        nba_data.team_stats(game_id, team, pts=pts, opponent_pts=opponent_pts, minutes=240)
 
 
 def violations(nba_data: NbaData, check_name: str) -> list[tuple[str, str]]:
@@ -118,18 +121,42 @@ def test_above_single_game_record(nba_data: NbaData) -> None:
     assert keys(nba_data, "above_single_game_record") == ["g1 7 reb"]
 
 
-def test_winner_with_fewer_points(nba_data: NbaData) -> None:
+def test_player_points_dont_match_team_score(nba_data: NbaData) -> None:
     add_clean_game(nba_data, "g1")
-    nba_data.conn.execute("UPDATE nba.player_game_stats SET won = NOT won WHERE game_id = 'g1'")
+    nba_data.conn.execute(
+        "UPDATE nba.player_game_stats SET pts = 20, fgm = 10, fga = 10 WHERE game_id = 'g1' "
+        "AND player_id = 100"
+    )
 
-    assert keys(nba_data, "result_doesnt_match_points") == ["g1"]
+    expected = [("g1 1", "2000-01 T1: players add up to 92, team scored 90")]
+    assert violations(nba_data, "player_points_dont_match_team_score") == expected
 
 
-def test_two_winners(nba_data: NbaData) -> None:
+def test_team_without_player_rows_is_reported(nba_data: NbaData) -> None:
     add_clean_game(nba_data, "g1")
-    nba_data.conn.execute("UPDATE nba.player_game_stats SET won = true WHERE game_id = 'g1'")
+    nba_data.conn.execute("DELETE FROM nba.player_game_stats WHERE team_id = 2")
 
-    assert keys(nba_data, "result_doesnt_match_points") == ["g1"]
+    assert violations(nba_data, "player_points_dont_match_team_score") == [
+        ("g1 2", "2000-01 T2: players add up to nothing, team scored 80")
+    ]
+
+
+def test_player_result_disagrees_with_team(nba_data: NbaData) -> None:
+    add_clean_game(nba_data, "g1")
+    nba_data.conn.execute(
+        "UPDATE nba.player_game_stats SET won = NOT won WHERE game_id = 'g1' AND team_id = 2"
+    )
+
+    assert keys(nba_data, "player_result_disagrees_with_team") == ["g1 2"]
+
+
+def test_games_without_team_scores(nba_data: NbaData) -> None:
+    add_clean_game(nba_data, "g1")
+    nba_data.game("g2")
+
+    assert violations(nba_data, "games_without_team_scores") == [
+        ("g2", "2000-01 Regular Season: 0 team row(s)")
+    ]
 
 
 def test_team_minutes_short(nba_data: NbaData) -> None:
@@ -275,3 +302,19 @@ def test_known_totals(nba_data: NbaData) -> None:
     # Every other known player isn't loaded here, so it's skipped.
     expected = [("Stephen Curry 2015-16 fg3m", "data has 10, official 402")]
     assert violations(nba_data, "known_totals") == expected
+
+
+def test_team_minutes_not_a_game_length(nba_data: NbaData) -> None:
+    add_clean_game(nba_data, "g1")
+    add_clean_game(nba_data, "g2")
+    nba_data.conn.execute(  # one overtime for both teams: fine
+        "UPDATE nba.team_game_stats SET minutes = 265 WHERE game_id = 'g1'"
+    )
+    nba_data.conn.execute(
+        "UPDATE nba.team_game_stats SET minutes = 168 WHERE game_id = 'g2' AND team_id = 2"
+    )
+
+    assert violations(nba_data, "team_minutes_not_a_game_length") == [
+        ("g2 1", "2000-01 T1: 240 minutes, opponent 168"),
+        ("g2 2", "2000-01 T2: 168 minutes, opponent 240"),
+    ]

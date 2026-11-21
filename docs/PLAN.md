@@ -28,8 +28,8 @@ Decisions:
 | 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
-| 8 | Team scores and box scores, checked against player rows | In progress: loaded with every backfill; quality check next |
-| 9 | Playoff rounds and series (who won each round, champions) | |
+| 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
+| 9 | Playoff rounds and series (who won each round, champions) | Next |
 | 10 | Player details (position, height, birth date, draft) | |
 | 11 | SQL safety checker | |
 | 12 | Connect Gemini (command-line first) | |
@@ -143,9 +143,10 @@ On your laptop:
   - A 0 in minutes means "not recorded" when the team's minutes fall well short of the game length (common before 1985).
   - Players the source lost (e.g. Loy Vaught, Clippers 1990-96: the box score has his line but no player ID) and wrong minutes in some 2005-07 games are documented as known gaps. Repairing them from per-game box scores is possible later.
 
-**8. Team scores and box scores.** Load the source's team-level game log too: one more request per season and season type, giving each team's final score and team box score for every game, back to 1946-47.
+**8. Team scores and box scores.** Done. Load the source's team-level game log too: one more request per season and season type, giving each team's final score and team box score for every game, back to 1946-47.
 - A table with one row per team per game, so the AI can answer questions about final scores, margins and team records, and team totals stay right even in games where the source lost a player row.
 - A quality check that each team's player points add up to its score in every game, replacing the weaker "winner scored fewer points" check. Disagreements are reported, not corrected.
+- Decided while building it: the team log decides each game's home/away and result, because it's self-consistent and a few old player rows aren't (7 games).
 
 **9. Playoff rounds and series.** Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down". Playoff game IDs appear to encode this (e.g. `0042300401`: round 4, the Finals, game 1), so it may need no extra requests. Check that against known results first.
 

@@ -91,8 +91,10 @@ games.
       column, but nothing proves which, so no value is guessed.
   - *W/L missing on a single player row* (25 rows, all in 1959-60 and 1960-61):
     filled in from teammates.
-  - *A couple of rows with the wrong home/away label* (1967-68 SFW at SDR: 10 rows
-    say away, 2 say home; those 2 are the only ones in history): majority vote per team.
+  - *Wrong home/away or W/L labels on player rows:* the team-level log decides
+    (see "Team log" below). For games missing from it, each team's home/away is a
+    majority vote of its rows. That vote once picked the wrong side: in 1967-68
+    SFW–SDR, 10 rows said SDR was home, but the team log says SFW.
   - *A player listed on both teams in one game:* 11 ghost rows dropped across
     history. Examples:
     - Bob Cousy 1951-52: 13 pts for BOS, plus an empty BAL copy with a stray FT
@@ -194,9 +196,14 @@ The first full run of `nba_query_app.quality` over the whole history, after the
 reload with the minutes rule above. Every violation was looked at. All are now
 listed in `KNOWN_EXCEPTIONS` with the reason, so the report shows 0 unexplained.
 
-- **Cleanup rules, exact totals for the full history:** 11 ghost rows dropped, 2
-  home/away labels outvoted, 127,544 zero-minute rows made "not recorded", 115
-  impossible attempt values made "not recorded", 25 missing W/L values filled in.
+- **Cleanup rules, exact totals for the full history** (with the team log):
+  - 11 ghost rows dropped
+  - 102 home/away labels overruled, 146 player W/L values corrected and 25 missing
+    W/L values filled in (see "Team log" below)
+  - 127,544 zero-minute rows made "not recorded"
+  - 232 impossible attempt values made "not recorded" (115 in player rows, 117 in
+    team rows)
+  - 1 unplayed game dropped (the cancelled 2012-13 Celtics–Pacers game)
 - **Spot-checks against official totals:** 8 of 11 match exactly, e.g. Kareem's
   38,387 and Jordan's 32,292 career points, Stockton's 15,806 assists and 3,265
   steals, Wilt's 4,029 points in 1961-62, Curry's 402 threes in 2015-16, Eaton's 456
@@ -223,11 +230,17 @@ listed in `KNOWN_EXCEPTIONS` with the reason, so the report shows 0 unexplained.
   shows e.g. Michael Redd with 20 minutes on 0020600111, where the box score says
   40:00. **Decision: document now; fix together with the repair above**, since both
   need box scores.
-- **Player points that don't match the team score (1946-47 to 1989-90).** 262 games
-  where the winner's player rows add up to fewer points than the loser's. Checked
-  against the source's team-level log for 1980-81: the W/L is right and the player
-  rows are off (e.g. 0028000198: Atlanta scored 88, but its player rows add up to
-  108). Nothing shows which row is wrong, so the source values are kept.
+- **Player points that don't match the team score:** 1,181 team-games where the
+  player rows don't add up to the team's score in the team log. All but 3 are
+  before 1996-97, including the lost-player games of 1990-96. In old games the
+  player rows are off (e.g. 0028000198: Atlanta scored 88, but its player rows add
+  up to 108). Nothing shows which row is wrong, so the source values are kept. The
+  3 later ones:
+  - 0029600070 (1996-97 CLE–DEN): Šarūnas Marčiulionis, a Denver player that
+    season, is listed under Cleveland. Moving his 7 points and 29 minutes would
+    fix both teams' points and minutes exactly, but the source is kept.
+  - 0029800661 (1998-99): the Nets' player rows add up to 97, their score is 93.
+    Cause unknown.
 - **Points that don't add up** (points ≠ 2 × 2-pointers + 3 × 3-pointers + free
   throws): 71 rows, all from 1946-47 to 1963-64. Kept as in the source.
 - **3-pointers above field goals:** 4 rows in 1985-86 and 1987-88. Kept.
@@ -244,7 +257,29 @@ listed in `KNOWN_EXCEPTIONS` with the reason, so the report shows 0 unexplained.
   - 2019-20: COVID-19.
   - Seasons with fewer than 82 games since 1967-68: the lockouts (1998-99: 50,
     2011-12: 66) and COVID-19 (2019-20, 2020-21: 72).
-- **Possible next check:** the source's team-level log (one request per season)
-  has each team's final score. Storing scores would catch every game whose player
-  rows don't add up, not only the ones where that flips the winner, and would let
-  the AI answer questions about final scores.
+
+## Team log (2026-11-21)
+The team-level `LeagueGameLog` (one row per team per game) is now loaded into
+`nba.team_game_stats` with every backfill, one extra request per season and season
+type.
+- **Coverage:** scores for every game back to 1946-47 (the first game: Toronto 66,
+  New York 68). Every stored game has exactly two team rows. Team box-score stats
+  are NULL where not recorded, as for players; very old games sometimes lack even
+  team field goals or free throws made, so only the score is required.
+- **One extra game:** the 2012-13 Celtics–Pacers game, cancelled after the Boston
+  Marathon bombing, is listed with no result and 0-0. It's dropped.
+- **The team log is self-consistent:** in every game, the team marked W has the
+  higher score.
+- **The player log isn't always:** 7 games from 1967-68 to 1978-79 disagree with the
+  team log on home/away or the result. In 3 the player rows marked the
+  lower-scoring team as the winner (e.g. 1974-11-19 CLE @ HOU, 85-94). In 2,
+  Atlanta–New Orleans on 1979-01-20 and 21, the player rows' labels look swapped
+  between the back-to-back games. **Decision (2026-11-21): the team log decides
+  each game's home/away and result**; player rows follow it.
+- **Dates:** 3 games in 1978-79 have dates one or two days apart between the logs
+  (e.g. 0027800354: 1978-12-23 in the player log, 12-25 in the team log). Dates
+  come from the player log; nothing shows which is right.
+- **Team minutes:** 240 for regulation plus 25 per overtime, 0 (not recorded) in
+  early seasons. Five values are impossible: 239, 247, 249 and 239 in 1960-62, and
+  Denver's 168 on 2026-11-14, whose player rows add up to 242. They're stored as
+  the source has them and listed by a quality check.

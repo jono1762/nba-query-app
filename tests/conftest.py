@@ -174,6 +174,31 @@ class NbaData:
             list(row.values()),
         )
 
+    def team_stats(
+        self, game_id: str, team_id: int, *, pts: int, opponent_pts: int, **stats: int | None
+    ) -> None:
+        """A team-log row: final score (won is worked out from it), other stats optional."""
+        home, away, neutral = self._games[game_id]
+        assert team_id in (home, away), f"team {team_id} isn't in game {game_id}"
+        row = {
+            "game_id": game_id,
+            "team_id": team_id,
+            "team_abbreviation": f"T{team_id}",
+            "opponent_team_id": away if team_id == home else home,
+            "is_home": None if neutral else team_id == home,
+            "won": pts > opponent_pts,
+            "pts": pts,
+            "opponent_pts": opponent_pts,
+            **stats,
+        }
+        self.conn.execute(
+            sql.SQL("INSERT INTO nba.team_game_stats ({}) VALUES ({})").format(
+                sql.SQL(", ").join(map(sql.Identifier, row)),
+                sql.SQL(", ").join(sql.Placeholder() * len(row)),
+            ),
+            list(row.values()),
+        )
+
 
 @pytest.fixture
 def nba_data(db: psycopg.Connection) -> NbaData:
