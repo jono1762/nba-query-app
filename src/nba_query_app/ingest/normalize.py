@@ -354,6 +354,7 @@ def _results_by_game_and_team(
 
     Old box scores occasionally miss W/L on a single player row, so a team's result
     comes from any teammate, or failing that, the opposite of the opponent's result.
+    Each game must end up with exactly one winner and one loser.
     """
     seen: dict[tuple[str, int], set[bool]] = {}
     for row in raw_rows:
@@ -373,6 +374,14 @@ def _results_by_game_and_team(
             team_won[(game_id, team_id)] = not next(iter(opponent_results))
         else:
             raise NormalizeError(f"No W/L result for either team in game {game_id}")
+
+    # There are no ties: every game needs exactly one winner and one loser.
+    outcomes: dict[str, list[bool]] = {}
+    for (game_id, _team_id), won in team_won.items():
+        outcomes.setdefault(game_id, []).append(won)
+    for game_id, results in outcomes.items():
+        if sorted(results) != [False, True]:
+            raise NormalizeError(f"Game {game_id} needs one winner and one loser, got {results}")
     return team_won
 
 

@@ -67,7 +67,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
   - Early seasons report `MIN = 0` for everyone, so a game where *every* player has 0 minutes becomes NULL minutes. A single 0 is real (under 30 seconds).
   - Attempts lower than makes (an impossible value in old box scores) become NULL attempts.
-- A W/L missing on one player row is filled in from teammates, or else from the opponent.
+- A W/L missing on one player row is filled in from teammates, or else from the opponent. Every game must end with exactly one winner and one loser (no ties).
 - Home/away per team is a majority vote of its rows. A few old rows are mislabelled.
 - **A player listed on both teams in one game** (`_resolve_duplicate_player_rows`):
   - Ghost copies are dropped. A copy is "real" if it has points, makes or minutes. Copies with identical scoring collapse to the most complete one.

@@ -127,7 +127,7 @@ On your laptop:
     - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
     - *Stats that disappear* after being fully recorded.
     - *Implausible numbers:* a player's points ≠ 2×FGM + FG3M + FTM where all are recorded, extreme single-game values.
-    - *Team totals that don't add up* within a game.
+    - *Team totals that don't add up* within a game, and any game without exactly one winner and one loser (also enforced when loading).
   - If a check finds something, look at the actual rows and decide, as with the old box-score errors in Phase 2b.
 
 **Phase 3: Safety checker (no AI yet)**

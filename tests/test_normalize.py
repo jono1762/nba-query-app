@@ -386,3 +386,18 @@ def test_duplicate_in_a_real_response_is_resolved(response: dict) -> None:
     stats = normalize_league_game_log(response).stats
     player = bos_row[headers.index("PLAYER_ID")]
     assert [s.team_id for s in stats if s.player_id == player] == [BOS]
+
+
+@pytest.mark.parametrize("result", ["W", "L"])
+def test_both_teams_with_the_same_result_is_an_error(response: dict, result: str) -> None:
+    set_wl_for_team(response, "0022600001", BOS, result)
+    set_wl_for_team(response, "0022600001", DET, result)
+    with pytest.raises(NormalizeError, match="one winner and one loser"):
+        normalize_league_game_log(response)
+
+
+def test_every_game_has_one_winner_and_one_loser(response: dict) -> None:
+    stats = normalize_league_game_log(response).stats
+    for game_id in {s.game_id for s in stats}:
+        results = {s.team_id: s.won for s in stats if s.game_id == game_id}
+        assert sorted(results.values()) == [False, True]
