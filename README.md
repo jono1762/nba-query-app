@@ -40,6 +40,9 @@ uv run --env-file .env python -m nba_query_app.ingest.backfill --help          #
   Stats that weren't recorded in early seasons are NULL ("not recorded"), not 0.
 - `nba.player_season_stats` view: season totals per player, calculated from the game
   rows. A total is NULL unless the stat was recorded in every one of the player's games.
+- `nba.stat_coverage` and `nba.stat_tracked_since` views: how completely each stat was
+  recorded per season, and the season each became fully recorded (at least 98% of rows).
+  They drive the AI's refuse-or-caveat rules for early seasons.
 - Roles (permission groups, no passwords):
   - `nba_reader`: read-only. All LLM-written SQL runs as a member of this role.
   - `nba_ingest`: can load data, but not change table structure.

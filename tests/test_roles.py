@@ -14,7 +14,17 @@ ConnectAs = Callable[[str], psycopg.Connection]
 
 
 @pytest.mark.parametrize(
-    "table", ["teams", "players", "games", "player_game_stats", "meta", "player_season_stats"]
+    "table",
+    [
+        "teams",
+        "players",
+        "games",
+        "player_game_stats",
+        "meta",
+        "player_season_stats",
+        "stat_coverage",
+        "stat_tracked_since",
+    ],
 )
 def test_reader_can_select_every_table(connect_as: ConnectAs, table: str) -> None:
     reader = connect_as("nba_reader")

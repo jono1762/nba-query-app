@@ -67,8 +67,9 @@ games.
   | 1979-80 | 99% | 99% | 98% | 72% | 82% | 65% | 85% |
   | 1985-86 | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
 
-  Coverage rises gradually and is often partial within a season. Step 7 will
-  compute exact "fully recorded from" seasons per stat.
+  Coverage rises gradually and is often partial within a season. The exact
+  seasons are computed from the data by the `nba.stat_tracked_since` view (see
+  "Stat coverage" below).
 
 - **Errors in old box scores, and how they're handled** (each found in the real
   data and covered by a test):
@@ -156,3 +157,29 @@ Decision: **official, competitive games only.**
 - Tagging needs the games loaded first. During the first run, 9 current-season
   Cup games played after the last load were refused until the regular season was
   refreshed. The check worked as intended.
+
+## Stat coverage (2026-11-21)
+The `nba.stat_tracked_since` view, on the full history. "Fully recorded" means
+every season from then on has the stat in at least 98% of player rows.
+
+| Stat | First recorded | Fully recorded from |
+|---|---|---|
+| Points, FG made, FT made | 1946-47 | 1946-47 |
+| FT attempted | 1946-47 | 1948-49 |
+| Assists | 1946-47 | 1975-76 |
+| Rebounds | 1950-51 | 1975-76 |
+| FG attempted | 1946-47 | 1976-77 |
+| Minutes | 1950-51 | 1976-77 |
+| 3-pointers made | 1979-80 | 1979-80 |
+| Personal fouls | 1946-47 | 1980-81 |
+| Off./def. rebounds, steals, blocks, turnovers, 3-pointers attempted | 1962-63 to 1979-80 | 1983-84 |
+| Plus-minus | 1996-97 | 1996-97 |
+
+- **Why 98% and not 99%:** 1984-85 sits at about 98.5% for most stats. A few
+  players have partial box scores all season (e.g. Eddie Johnson, Kansas City Kings:
+  73 games with points but no rebounds and 0 minutes). At 99%, every stat would
+  start in 1985-86.
+- Steals, turnovers and offensive/defensive rebounds each have one to three stray
+  values years before the league started counting them (first recorded 1962-63 to
+  1970-71, against official starts of 1973-74 and 1977-78). That's why their "first
+  recorded" season is so early.
