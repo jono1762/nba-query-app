@@ -19,11 +19,6 @@ Decisions:
 
 ## Progress
 
-Steps are numbered in build order. (Until 2026-11-21 they were "phases" with
-letters. Old commit messages use those labels: Phase 0 = step 1, 1a = 2, 1b = 3,
-2a = 4, 2b = 5, Cup rounds = 6, 2c = 7, 3 = 8, 4a = 9, 4b = 10, 5 = 11, 6 = 12,
-7 = 13, 8a = 14, 8b = 15, 9 = 16, 10 = 17.)
-
 | Step | What | Status |
 |---|---|---|
 | 1 | Data-source tests (stats.nba.com, cdn.nba.com) | Done, see `spikes/FINDINGS.md` |
@@ -177,7 +172,7 @@ On your laptop:
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
 - **The one-sentence AI summary is off by default.** It would double AI usage per question.
 - **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 16.
-- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 10, 11) and 305 MB instead of 140 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 14.
+- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 10, 11) and storage: 305 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 14.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
 
 ## How we'll know it works

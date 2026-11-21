@@ -9,7 +9,7 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
   request**, in under a second, with no special headers needed.
   - 2000-01: 23,973 rows, 1,189 games (4.6 MB of JSON)
   - 2026-27 so far: 4,721 rows, 210 games, latest game 2026-11-17 (yesterday)
-- So the full 2000-01 to now backfill is about 27 requests and roughly 650k rows.
+- So a download needs only one request per season and season type.
 - Data is up to date the morning after games, so this source could also handle
   daily updates, as long as it runs from a home connection.
 - 32 columns: IDs and names for player, team and game, date, matchup, W/L, and the
@@ -40,30 +40,21 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
 - cdn.nba.com is dropped. Its test script was deleted, but it's still in git
   history (commit a370626) if a cloud-based update is ever tested from AWS.
 
-## Full backfill (2026-11-20)
-- 27 seasons (2000-01 to 2026-27), regular season and playoffs: 54 requests in
-  116 seconds with a 1-second pause between them. No errors and no retries needed.
-- Result: 699,228 player-game rows, 33,636 games, 2,641 players, 30 teams.
-  The whole database is 140 MB, within Neon's free 0.5 GB.
-- Sanity checks passed:
-  - 1,230 regular-season games in a normal 30-team season (1,189 in 2000-01
-    with 29 teams).
-  - Shortened seasons show fewer games (2011-12: 990, 2019-20: 1,059).
-  - Known records are present (Kobe 81 on 2006-01-22, Dončić 73 on 2024-01-26).
-- **11 neutral-site games** were detected. They match known neutral venues: Mexico
-  City (MIA-WAS 2024-11-02, DAL-DET 2025-11-01), the Las Vegas NBA Cup
-  semifinals (2024-12-14), and Paris (IND-SAS, January 2025).
-  - Earlier international games are listed with a normal home team, so they
-    aren't flagged.
-
 ## Full history from 1946-47, plus play-in (2026-11-20)
 Decision: load every season from 1946-47 (the BAA's first season) and add play-in
-games. The 2000-01 to now load above was the first step.
+games.
 
 - **Load:** 81 seasons × regular season, play-in (from 2019-20) and playoffs. That's
   170 requests in about 5 minutes from an empty database.
 - **Result:** 1,487,560 player-game rows, 73,392 games (37 play-in), 5,159
   players, 45 franchises. The database is **305 MB**, about 60% of Neon's free 0.5 GB.
+- **Sanity checks passed:**
+  - 1,230 regular-season games in a normal 30-team season (1,189 in 2000-01
+    with 29 teams).
+  - Shortened seasons show fewer games (2011-12: 990, 2019-20: 1,059).
+  - Known records are present: Wilt Chamberlain 100 on 1962-03-02, Kobe 81 on
+    2006-01-22, Dončić 73 on 2024-01-26.
+  - Reloading a season changes nothing.
 - **Missing stats are NULL in the source**, never 0, with one exception: early
   seasons report `MIN = 0` for every player. How complete each stat is, by season
   (share of rows with a value):
@@ -114,9 +105,11 @@ games. The 2000-01 to now load above was the first step.
   points). He'd been traded to PHX earlier that season, so the 8 points probably
   belong to his PHX row, but nothing in the data proves it. Both rows are kept as
   the source has them.
-- **Neutral-site games:** still 11, all from 2024-25 on. Earlier neutral-venue
-  games, common in the 1950s-60s, are listed with a normal home team in the
-  source, so they aren't flagged.
+- **Neutral-site games:** 11, all from 2024-25 on, matching known neutral
+  venues: Mexico City (MIA-WAS 2024-11-02, DAL-DET 2025-11-01), the Las Vegas NBA
+  Cup semifinals (2024-12-14) and Paris (IND-SAS, January 2025). Earlier
+  neutral-venue games, common in the 1950s-60s, are listed with a normal home team
+  in the source, so they aren't flagged.
 
 ## Which games are included (2026-11-20)
 Decision: **official, competitive games only.**
