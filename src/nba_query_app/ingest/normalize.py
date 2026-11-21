@@ -5,7 +5,9 @@ The player-level response has one row per player per game. From it we derive:
 - games (date, season, home and away team),
 - box score rows (with opponent, home/away and win/loss worked out).
 The optional team-level response (one row per team per game) gives each team's
-final score and totals.
+final score and totals. It also decides each game's home/away and result: its
+winner always has the higher score, while old player rows occasionally carry the
+wrong labels. The player rows' own labels are the fallback.
 
 Many stats weren't recorded in early seasons. Those arrive as null and stay None
 ("not recorded", which is different from 0). The one exception is minutes: early
@@ -126,10 +128,11 @@ class TeamGameStats:
 # Names of the cleanup rules counted in Batch.cleanups, with what each count means.
 CLEANUP_RULES = {
     "ghost_rows_dropped": "ghost copies of a player listed on both teams, dropped",
-    "home_away_outvoted": "rows whose home/away label was outvoted by teammates",
+    "home_away_outvoted": "rows whose home/away label was overruled (team log or teammates)",
     "zero_minutes_not_recorded": "0-minute rows on a team whose minutes fall short (now NULL)",
     "attempts_not_recorded": "attempt values lower than the makes (now NULL)",
     "win_loss_filled_in": "rows missing W/L, filled in from teammates or the opponent",
+    "win_loss_overruled": "player rows whose W/L disagreed with the team log (corrected)",
     "unplayed_games_dropped": "games in the team log with no result and 0-0 (e.g. cancelled)",
 }
 
@@ -225,9 +228,18 @@ def normalize_league_game_log(
     raw_rows = _resolve_duplicate_player_rows(raw_rows)
     cleanups["ghost_rows_dropped"] += rows_before - len(raw_rows)
 
-    home_away, cleanups["home_away_outvoted"] = _home_and_away_by_game(raw_rows)
+    # Home/away and results: the team log decides for the games it has (one row
+    # per team, and its winner always has the higher score); the player rows'
+    # own labels are the fallback.
+    decided = _home_away_and_results_from_team_log(team_stats)
+    undecided = [row for row in raw_rows if row["GAME_ID"] not in decided]
+    home_away = _home_and_away_by_game(undecided)
+    team_won = _results_by_game_and_team(undecided, home_away)
+    for game_id, (home_id, away_id, opponent_of, won_by_team) in decided.items():
+        home_away[game_id] = (home_id, away_id, opponent_of)
+        team_won.update({(game_id, team_id): won for team_id, won in won_by_team.items()})
+    _check_teams_match(raw_rows, home_away)
     minutes_missing = _teams_without_minutes(raw_rows)
-    team_won = _results_by_game_and_team(raw_rows, home_away)
 
     teams: dict[int, Team] = {}
     players: dict[int, Player] = {}
@@ -272,6 +284,9 @@ def normalize_league_game_log(
             counting[column] = row[source]
         cleanups["attempts_not_recorded"] += _drop_impossible_attempts(counting)
         cleanups["win_loss_filled_in"] += row["WL"] is None
+        won = team_won[(game_id, team_id)]
+        cleanups["win_loss_overruled"] += row["WL"] is not None and parse_won(row["WL"]) != won
+        cleanups["home_away_outvoted"] += parse_is_home(row["MATCHUP"]) != bool(is_home)
 
         stats.append(
             PlayerGameStats(
@@ -281,7 +296,7 @@ def normalize_league_game_log(
                 team_abbreviation=row["TEAM_ABBREVIATION"],
                 opponent_team_id=opponent_id,
                 is_home=is_home,
-                won=team_won[(game_id, team_id)],
+                won=won,
                 **counting,
             )
         )
@@ -373,13 +388,13 @@ def normalize_team_game_log(
 
 def _home_and_away_by_game(
     raw_rows: list[dict[str, Any]],
-) -> tuple[dict[str, tuple[int | None, int | None, dict[int, int]]], int]:
-    """For each game: (home team, away team, {team: its opponent}); plus the outvoted rows.
+) -> dict[str, tuple[int | None, int | None, dict[int, int]]]:
+    """For each game: (home team, away team, {team: its opponent}).
 
     Home and away are None for neutral-site games, where both teams are listed as away.
     Each team's home/away is the majority of its players' rows: old box scores
-    occasionally mislabel a couple of rows (e.g. 10 say '@', 2 say 'vs.'). The
-    second value counts the rows that were outvoted.
+    occasionally mislabel a couple of rows (e.g. 10 say '@', 2 say 'vs.').
+    Used only for games missing from the team log, which otherwise decides.
     """
     votes: dict[str, dict[int, list[int]]] = {}  # game -> team -> [home votes, away votes]
     for row in raw_rows:
@@ -387,13 +402,11 @@ def _home_and_away_by_game(
         tally[0 if parse_is_home(row["MATCHUP"]) else 1] += 1
 
     is_home_by_game: dict[str, dict[int, bool]] = {}
-    outvoted = 0
     for game_id, teams in votes.items():
         for team_id, (home_votes, away_votes) in teams.items():
             if home_votes == away_votes:
                 raise NormalizeError(f"Rows for game {game_id} disagree about home/away")
             is_home_by_game.setdefault(game_id, {})[team_id] = home_votes > away_votes
-            outvoted += min(home_votes, away_votes)
 
     result = {}
     for game_id, flags in is_home_by_game.items():
@@ -408,7 +421,37 @@ def _home_and_away_by_game(
             result[game_id] = (None, None, opponent_of)  # neutral site
         else:
             raise NormalizeError(f"Both teams are listed as home in game {game_id}")
-    return result, outvoted
+    return result
+
+
+def _home_away_and_results_from_team_log(
+    team_stats: list[TeamGameStats],
+) -> dict[str, tuple[int | None, int | None, dict[int, int], dict[int, bool]]]:
+    """For each game in the team log: (home, away, {team: opponent}, {team: won})."""
+    result: dict[str, tuple[int | None, int | None, dict[int, int], dict[int, bool]]] = {}
+    for row in team_stats:
+        home, away, opponent_of, won_by_team = result.get(row.game_id, (None, None, {}, {}))
+        if row.is_home is True:
+            home = row.team_id
+        elif row.is_home is False:
+            away = row.team_id
+        opponent_of[row.team_id] = row.opponent_team_id
+        won_by_team[row.team_id] = row.won
+        result[row.game_id] = (home, away, opponent_of, won_by_team)
+    return result
+
+
+def _check_teams_match(
+    raw_rows: list[dict[str, Any]],
+    home_away: dict[str, tuple[int | None, int | None, dict[int, int]]],
+) -> None:
+    """Every player row's team must be one of its game's two teams."""
+    for row in raw_rows:
+        if row["TEAM_ID"] not in home_away[row["GAME_ID"]][2]:
+            raise NormalizeError(
+                f"Team {row['TEAM_ID']} has player rows in game {row['GAME_ID']}, "
+                "but the team log doesn't list it"
+            )
 
 
 def _real_stats(row: dict[str, Any]) -> tuple:
@@ -503,6 +546,7 @@ def _results_by_game_and_team(
 
     Old box scores occasionally miss W/L on a single player row, so a team's result
     comes from any teammate, or failing that, the opposite of the opponent's result.
+    Used only for games missing from the team log, which otherwise decides.
     Each game must end up with exactly one winner and one loser.
     """
     seen: dict[tuple[str, int], set[bool]] = {}

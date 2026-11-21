@@ -24,10 +24,11 @@ uv run --env-file .env pytest        # all tests (database tests need Postgres r
 ## Loading NBA data
 
 Data comes from stats.nba.com, which blocks cloud servers, so run this from a home
-connection. A whole season is one request. Reruns are safe: unchanged rows are skipped.
+connection. A whole season is two requests (player and team logs). Reruns are safe:
+unchanged rows are skipped.
 
 ```bash
-uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~5 min)
+uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~10 min)
 uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27  # just the current season
 uv run --env-file .env python -m nba_query_app.ingest.backfill --help          # all options
 uv run --env-file .env python -m nba_query_app.quality                         # data-quality report

@@ -38,7 +38,7 @@ uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] 
 uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
 ```
 
-The backfill makes real requests to stats.nba.com (about 170 for the full history, roughly 5 minutes). Run it only when data is actually needed.
+The backfill makes real requests to stats.nba.com (about 340 for the full history, two per season and season type, roughly 10 minutes). Run it only when data is actually needed.
 
 Without `DATABASE_URL`, database tests are **skipped**. With `REQUIRE_DATABASE=1` (set in CI) they **fail** instead.
 
@@ -46,7 +46,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 
 ## Architecture
 
-**Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch → normalize → load. Each one commits on its own, so a crash keeps earlier seasons.
+**Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch the player-level and team-level logs (two requests) → normalize both together → load. Each one commits on its own, so a crash keeps earlier seasons.
 - `ingest/fetch.py` calls stats.nba.com `LeagueGameLog`, which returns a whole season in one request: `level="player"` gives one row per player per game, `level="team"` one row per team per game. It retries with increasing waits and raises `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats`, and, when the team-level response is passed too, `TeamGameStats` (`normalize_team_game_log`).
 - `ingest/load.py` upserts a `Batch` in one transaction.
@@ -67,6 +67,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in, 6 = NBA Cup final; anything else, including 1 = preseason and 3 = All-Star, is rejected), then the start year. It becomes `'2026-27'`.
   - The API calls play-in `PlayIn` (from 2019-20); we store it as `Play-In`.
   - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. Only the prefix-6 final is loaded as box scores, because the group, quarterfinal and semifinal games count as regular-season games we already have. All Cup games get `nba_cup_round` (see `ingest/cup.py`).
+- **The team log decides each game's home/away and W/L.** It has one row per team, and its winner always has the higher score, while a few old player rows carry wrong labels (e.g. 1974-11-19, where the player rows say CLE won with 85 to HOU's 94). Player rows follow it, and overruled labels are counted. The rules below for home/away and W/L are the fallback for games missing from the team log.
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
@@ -107,7 +108,7 @@ Consequences of this setup:
 
 ## Constraints to keep in mind
 
-- **stats.nba.com blocks cloud IPs**, so ingestion runs from a home machine. cdn.nba.com returned 403 even from home and was dropped. The daily update will be a local scheduled job that re-fetches the current season (one request), relying on idempotent upserts.
+- **stats.nba.com blocks cloud IPs**, so ingestion runs from a home machine. cdn.nba.com returned 403 even from home and was dropped. The daily update will be a local scheduled job that re-fetches the current season (two requests: player and team logs), relying on idempotent upserts.
 - **Data goes into the local Docker database for now.** Neon is set up and loaded in step 17 of `docs/PLAN.md`.
 - **The Gemini free tier has tight per-minute and daily limits.** Tests must never call the real LLM, so use stubs. The accuracy eval runs only when triggered by hand.
 - **The LLM doesn't know today's date.** Always pass the current date, the current season and `nba.meta.latest_game_date` into the prompt.

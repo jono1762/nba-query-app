@@ -28,7 +28,7 @@ Decisions:
 | 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
-| 8 | Team scores and box scores, checked against player rows | In progress: table and loader done |
+| 8 | Team scores and box scores, checked against player rows | In progress: loaded with every backfill; quality check next |
 | 9 | Playoff rounds and series (who won each round, champions) | |
 | 10 | Player details (position, height, birth date, draft) | |
 | 11 | SQL safety checker | |
@@ -87,7 +87,7 @@ On your laptop:
   every day:  scheduled update ──► stats.nba.com (current season)    ──► database
 ```
 
-**Why the downloads run on your laptop:** stats.nba.com blocks cloud servers but allows home internet. We tested cdn.nba.com as a cloud-friendly alternative, but it refused even home requests (403), so we dropped it. Each daily run re-fetches the whole current season in one request and adds only what's new, so missed days catch up automatically.
+**Why the downloads run on your laptop:** stats.nba.com blocks cloud servers but allows home internet. We tested cdn.nba.com as a cloud-friendly alternative, but it refused even home requests (403), so we dropped it. Each daily run re-fetches the whole current season in two requests (player and team logs) and adds only what's new, so missed days catch up automatically.
 
 ---
 

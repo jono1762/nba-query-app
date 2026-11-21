@@ -580,3 +580,52 @@ def test_team_log_needs_two_teams_per_game(team_response: dict) -> None:
     team_response["resultSets"][0]["rowSet"].pop(0)
     with pytest.raises(NormalizeError, match="expected 2"):
         normalize_team_game_log(team_response)
+
+
+def test_team_log_decides_home_and_away(response: dict, team_response: dict) -> None:
+    # Real example: 1967-68 SFW-SDR, where the player rows' majority said SDR was home
+    # but the team log says SFW.
+    set_matchups(response, "0022600002", {PHI: "PHI vs. NYK", NYK: "NYK @ PHI"})
+
+    batch = normalize_league_game_log(response, team_response)
+
+    game = next(g for g in batch.games if g.game_id == "0022600002")
+    assert (game.home_team_id, game.away_team_id) == (NYK, PHI)
+    game_rows = [s for s in batch.stats if s.game_id == "0022600002"]
+    assert all(s.is_home == (s.team_id == NYK) for s in game_rows)
+    assert batch.cleanups == {"home_away_outvoted": len(game_rows)}
+
+
+def test_team_log_decides_the_result(response: dict, team_response: dict) -> None:
+    # Real example: 1974-11-19 CLE @ HOU, where the player rows said CLE won 85-94.
+    set_wl_for_team(response, "0022600001", BOS, "W")
+    set_wl_for_team(response, "0022600001", DET, "L")
+
+    batch = normalize_league_game_log(response, team_response)
+
+    game_rows = [s for s in batch.stats if s.game_id == "0022600001"]
+    assert all(s.won == (s.team_id == DET) for s in game_rows)
+    assert batch.cleanups == {"win_loss_overruled": len(game_rows)}
+
+
+def test_games_missing_from_the_team_log_use_the_player_labels(
+    response: dict, team_response: dict
+) -> None:
+    rows = team_response["resultSets"][0]["rowSet"]
+    rows[:] = [r for r in rows if "0022600002" not in r]  # only BOS @ DET in the team log
+    set_column(response, "MATCHUP", "PHI vs. NYK", row_index=0)  # outvoted by teammates
+
+    batch = normalize_league_game_log(response, team_response)
+
+    game = next(g for g in batch.games if g.game_id == "0022600002")
+    assert (game.home_team_id, game.away_team_id) == (NYK, PHI)
+    assert len(batch.team_stats) == 2
+    assert batch.cleanups == {"home_away_outvoted": 1}
+
+
+def test_player_team_missing_from_the_team_log_is_an_error(
+    response: dict, team_response: dict
+) -> None:
+    set_team_column(team_response, "TEAM_ID", 1, row_index=0)  # BOS replaced
+    with pytest.raises(NormalizeError, match="doesn't list it"):
+        normalize_league_game_log(response, team_response)
