@@ -23,8 +23,9 @@ from typing import Any
 
 import psycopg
 
+from nba_query_app.ingest.cup import cup_rounds, final_only
 from nba_query_app.ingest.fetch import SEASON_TYPES, fetch_league_game_log
-from nba_query_app.ingest.load import LoadResult, load_batch
+from nba_query_app.ingest.load import LoadResult, load_batch, load_cup_rounds
 from nba_query_app.ingest.normalize import normalize_league_game_log
 from nba_query_app.seasons import season_for_date, season_start_year, seasons_between
 
@@ -61,7 +62,10 @@ def backfill(
     """Fetch, convert and load each season/type in turn, pausing between requests.
 
     Season types are skipped for seasons before they existed (play-in 2019-20,
-    NBA Cup final 2023-24).
+    NBA Cup final 2023-24). The NBA Cup request returns every Cup game: the final's
+    box scores are loaded, and every Cup game is tagged with its round. That relies
+    on the regular season (which holds the other Cup games) being loaded first,
+    which the order of SEASON_TYPES guarantees within each season.
     """
     results = []
     jobs = [
@@ -75,13 +79,19 @@ def backfill(
             sleep(pause_seconds)  # be polite to stats.nba.com
         started = time.perf_counter()
         response = fetch(season, season_type)
+        rounds = {}
+        if season_type == "NBA Cup Final":
+            rounds = cup_rounds(response)
+            response = final_only(response)
         batch = normalize_league_game_log(response)
         loaded = load_batch(conn, batch)
+        rounds_changed = load_cup_rounds(conn, rounds)
         result = SeasonResult(season, season_type, len(batch.stats), loaded)
         results.append(result)
+        cup_note = f", {len(rounds)} Cup games tagged ({rounds_changed} changed)" if rounds else ""
         log(
             f"{season} {season_type:<14} {result.rows_fetched:>6} rows, "
-            f"{loaded.stats:>6} new/changed  ({time.perf_counter() - started:.1f}s)"
+            f"{loaded.stats:>6} new/changed{cup_note}  ({time.perf_counter() - started:.1f}s)"
         )
     return results
 

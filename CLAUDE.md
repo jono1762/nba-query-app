@@ -9,7 +9,7 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB.
+- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB. NBA Cup games are tagged with their round.
 
 Not built yet:
 - SQL safety checker
@@ -47,9 +47,11 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `ingest/fetch.py` calls stats.nba.com `LeagueGameLog` (player mode), which returns a whole season in one request. It retries with increasing waits and raises `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats`.
 - `ingest/load.py` upserts a `Batch` in one transaction.
+- `ingest/cup.py` (pure) handles the NBA Cup request, which returns *every* Cup game: `final_only` keeps the final's rows for loading, and `cup_rounds` works out each game's round. A team's first 4 Cup games are group games, its 5th the quarterfinal, its 6th the semifinal, its 7th the final. `load.load_cup_rounds` then tags the stored games; it refuses if a Cup game isn't loaded yet, which is why the regular season comes first in `SEASON_TYPES`.
 - Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.
+- The one deliberate exception is `games.nba_cup_round`. It's set by a separate UPDATE and kept out of `Game`, so reloading a regular season can't wipe it. Upserts only touch the columns they list.
 
 **Upserts change only what changed.**
 - `DO UPDATE … WHERE (cols) IS DISTINCT FROM (EXCLUDED cols)` skips unchanged rows.
@@ -61,7 +63,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - **Official, competitive games only** (a deliberate product decision, see `docs/PLAN.md`): exhibitions such as the All-Star game and preseason are excluded.
 - `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in, 6 = NBA Cup final; anything else, including 1 = preseason and 3 = All-Star, is rejected), then the start year. It becomes `'2026-27'`.
   - The API calls play-in `PlayIn` (from 2019-20); we store it as `Play-In`.
-  - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. `fetch.py` keeps only the prefix-6 final, because the other Cup games are regular-season games we already have.
+  - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. Only the prefix-6 final is loaded as box scores, because the group, quarterfinal and semifinal games count as regular-season games we already have. All Cup games get `nba_cup_round` (see `ingest/cup.py`).
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
@@ -96,15 +98,18 @@ Consequences of this setup:
 ## Constraints to keep in mind
 
 - **stats.nba.com blocks cloud IPs**, so ingestion runs from a home machine. cdn.nba.com returned 403 even from home and was dropped. The daily update will be a local scheduled job that re-fetches the current season (one request), relying on idempotent upserts.
-- **Data goes into the local Docker database for now.** Neon is set up and loaded in Phase 8.
+- **Data goes into the local Docker database for now.** Neon is set up and loaded in step 14 of `docs/PLAN.md`.
 - **The Gemini free tier has tight per-minute and daily limits.** Tests must never call the real LLM, so use stubs. The accuracy eval runs only when triggered by hand.
 - **The LLM doesn't know today's date.** Always pass the current date, the current season and `nba.meta.latest_game_date` into the prompt.
 - **GitHub Actions:** `astral-sh/setup-uv` no longer publishes moving major tags, so pin an exact version (e.g. `@v10.3.3`). CI runs only on pushes to `main` and on pull requests.
 
 ## Working agreement with the user
 
-- The user reviews every change **commit by commit** in VS Code's Source Control Graph. Work on one branch per feature or phase, with small focused commits, each passing lint and tests on its own.
-- Push the branch and open a PR (`gh pr create`) so CI runs **before** asking for review. After approval, merge with `gh pr merge --merge --delete-branch`, pull `main`, and confirm CI passes on `main`.
+- The user reviews every change **commit by commit** in VS Code's Source Control Graph. Work on one branch per feature or plan step, with small focused commits, each passing lint and tests on its own.
+- **Keep branches local until the user says "merge".** Don't push or open a PR before that.
+  - Before asking for review, run what CI runs, locally: `ruff check`, `ruff format --check`, and the full test suite against Postgres, for each commit on its own.
+  - On "merge": push the branch, open a PR (`gh pr create`), wait for CI to pass, then `gh pr merge --merge --delete-branch`, pull `main`, and confirm CI passes on `main`.
+  - If CI fails at that point, stop and show the user the fix before merging.
 - Explain things in plain language and define infrastructure, AWS and database jargon. The user isn't familiar with many of these terms.
 - **Keep docs and comments in sync with the code, in the same commit as the change that affects them.** That covers:
   - `README.md` (commands, layout)

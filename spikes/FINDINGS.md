@@ -1,4 +1,6 @@
-# Phase 0 spike findings
+# Spike findings
+
+Experiments and data investigations. The first sections are step 1 of `docs/PLAN.md`.
 
 Run on 2026-11-18 from a home connection (WSL2 on Windows).
 
@@ -7,7 +9,7 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
   request**, in under a second, with no special headers needed.
   - 2000-01: 23,973 rows, 1,189 games (4.6 MB of JSON)
   - 2026-27 so far: 4,721 rows, 210 games, latest game 2026-11-17 (yesterday)
-- So the full 2000-01 to now backfill is about 27 requests and roughly 650k rows.
+- So a download needs only one request per season and season type.
 - Data is up to date the morning after games, so this source could also handle
   daily updates, as long as it runs from a home connection.
 - 32 columns: IDs and names for player, team and game, date, matchup, W/L, and the
@@ -30,7 +32,7 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
   but there's no reason to expect it to work better.
 
 ## What this means for the plan
-- The history download (Phase 2) works as planned.
+- The history download (step 5) works as planned.
 - **Decision (2026-11-18): use stats.nba.com only.** It handles both the history
   download and the daily update. The daily update runs as a scheduled task on a
   home machine instead of in AWS. Each run fetches the whole current season in
@@ -38,30 +40,21 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
 - cdn.nba.com is dropped. Its test script was deleted, but it's still in git
   history (commit a370626) if a cloud-based update is ever tested from AWS.
 
-## Full backfill (2026-11-20)
-- 27 seasons (2000-01 to 2026-27), regular season and playoffs: 54 requests in
-  116 seconds with a 1-second pause between them. No errors and no retries needed.
-- Result: 699,228 player-game rows, 33,636 games, 2,641 players, 30 teams.
-  The whole database is 140 MB, within Neon's free 0.5 GB.
-- Sanity checks passed:
-  - 1,230 regular-season games in a normal 30-team season (1,189 in 2000-01
-    with 29 teams).
-  - Shortened seasons show fewer games (2011-12: 990, 2019-20: 1,059).
-  - Known records are present (Kobe 81 on 2006-01-22, Dončić 73 on 2024-01-26).
-- **11 neutral-site games** were detected. They match known neutral venues: Mexico
-  City (MIA-WAS 2024-11-02, DAL-DET 2025-11-01), the Las Vegas NBA Cup
-  semifinals (2024-12-14), and Paris (IND-SAS, January 2025).
-  - Earlier international games are listed with a normal home team, so they
-    aren't flagged.
-
 ## Full history from 1946-47, plus play-in (2026-11-20)
 Decision: load every season from 1946-47 (the BAA's first season) and add play-in
-games. The 2000-01 to now load above was the first step.
+games.
 
 - **Load:** 81 seasons × regular season, play-in (from 2019-20) and playoffs. That's
   170 requests in about 5 minutes from an empty database.
 - **Result:** 1,487,560 player-game rows, 73,392 games (37 play-in), 5,159
   players, 45 franchises. The database is **305 MB**, about 60% of Neon's free 0.5 GB.
+- **Sanity checks passed:**
+  - 1,230 regular-season games in a normal 30-team season (1,189 in 2000-01
+    with 29 teams).
+  - Shortened seasons show fewer games (2011-12: 990, 2019-20: 1,059).
+  - Known records are present: Wilt Chamberlain 100 on 1962-03-02, Kobe 81 on
+    2006-01-22, Dončić 73 on 2024-01-26.
+  - Reloading a season changes nothing.
 - **Missing stats are NULL in the source**, never 0, with one exception: early
   seasons report `MIN = 0` for every player. How complete each stat is, by season
   (share of rows with a value):
@@ -74,7 +67,7 @@ games. The 2000-01 to now load above was the first step.
   | 1979-80 | 99% | 99% | 98% | 72% | 82% | 65% | 85% |
   | 1985-86 | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
 
-  Coverage rises gradually and is often partial within a season. Phase 2c will
+  Coverage rises gradually and is often partial within a season. Step 7 will
   compute exact "fully recorded from" seasons per stat.
 
 - **Errors in old box scores, and how they're handled** (each found in the real
@@ -112,9 +105,11 @@ games. The 2000-01 to now load above was the first step.
   points). He'd been traded to PHX earlier that season, so the 8 points probably
   belong to his PHX row, but nothing in the data proves it. Both rows are kept as
   the source has them.
-- **Neutral-site games:** still 11, all from 2024-25 on. Earlier neutral-venue
-  games, common in the 1950s-60s, are listed with a normal home team in the
-  source, so they aren't flagged.
+- **Neutral-site games:** 11, all from 2024-25 on, matching known neutral
+  venues: Mexico City (MIA-WAS 2024-11-02, DAL-DET 2025-11-01), the Las Vegas NBA
+  Cup semifinals (2024-12-14) and Paris (IND-SAS, January 2025). Earlier
+  neutral-venue games, common in the 1950s-60s, are listed with a normal home team
+  in the source, so they aren't flagged.
 
 ## Which games are included (2026-11-20)
 Decision: **official, competitive games only.**
@@ -140,3 +135,24 @@ Decision: **official, competitive games only.**
   - For the new format (2024-25 on), the `003…` game IDs mix the All-Star games
     with Rising Stars games, and some return nothing, so the real All-Star games
     can't be identified reliably.
+
+## NBA Cup rounds (2026-11-21)
+- **Why the final doesn't count but the other knockout games do:** the league
+  schedules only 80 games per team in advance (the 4 group games are among them)
+  and leaves 2 December dates open.
+  - Teams that miss the knockouts get 2 extra ordinary games.
+  - Quarterfinal losers get the quarterfinal plus 1 extra game.
+  - Semifinalists play the quarterfinal and semifinal as games 81 and 82.
+  - For the two finalists the final would be game 83, so it's left out of
+    regular-season stats.
+- **Structure in the data** (team-level "IST" logs): every finished Cup had 22
+  teams with 4 Cup games, 4 with 5, 2 with 6 and 2 with 7. So a team's 5th, 6th and
+  7th Cup games are its quarterfinal, semifinal and final. This rule also works
+  while a tournament is in progress: as of 2026-11-21, the 2026-27 Cup has 37
+  group games.
+- **Result:** each finished Cup is tagged as 60 group games, 4 quarterfinals, 2
+  semifinals and 1 final. The brackets chain correctly (2025-26: quarterfinal
+  winners ORL, NYK, OKC, SAS; semifinal winners NYK, SAS; NYK won the final).
+- Tagging needs the games loaded first. During the first run, 9 current-season
+  Cup games played after the last load were refused until the regular season was
+  refreshed. The check worked as intended.
