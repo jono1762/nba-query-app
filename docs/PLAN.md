@@ -29,16 +29,18 @@ Decisions:
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
 | 8 | Team scores and box scores, checked against player rows | Next |
-| 9 | SQL safety checker | |
-| 10 | Connect Gemini (command-line first) | |
-| 11 | Retries, refusals, cost logging | |
-| 12 | Accuracy test | |
-| 13 | Web API, plus `docs/ARCHITECTURE.md` | |
-| 14 | Webpage | |
-| 15 | Neon setup and first AWS deploy | |
-| 16 | Automatic deploys | |
-| 17 | Daily update | |
-| 18 | Polish | |
+| 9 | Playoff rounds and series (who won each round, champions) | |
+| 10 | Player details (position, height, birth date, draft) | |
+| 11 | SQL safety checker | |
+| 12 | Connect Gemini (command-line first) | |
+| 13 | Retries, refusals, cost logging | |
+| 14 | Accuracy test | |
+| 15 | Web API, plus `docs/ARCHITECTURE.md` | |
+| 16 | Webpage | |
+| 17 | Neon setup and first AWS deploy | |
+| 18 | Automatic deploys | |
+| 19 | Daily update | |
+| 20 | Polish | |
 
 ---
 
@@ -120,7 +122,7 @@ On your laptop:
 
 **4. Convert NBA data into rows.** Loading twice changes nothing. Handles neutral-site games and team renames. Done.
 
-**5. Full history download.** Every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens in step 15.
+**5. Full history download.** Every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens in step 17.
 
 **6. NBA Cup rounds.** Each Cup game is tagged as group, quarterfinal, semifinal or final. Done.
 
@@ -145,29 +147,34 @@ On your laptop:
 - A table with one row per team per game, so the AI can answer questions about final scores, margins and team records, and team totals stay right even in games where the source lost a player row.
 - A quality check that each team's player points add up to its score in every game, replacing the weaker "winner scored fewer points" check. Disagreements are reported, not corrected.
 
-**9. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+**9. Playoff rounds and series.** Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down". Playoff game IDs appear to encode this (e.g. `0042300401`: round 4, the Finals, game 1), so it may need no extra requests. Check that against known results first.
 
-**10. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+**10. Player details.** Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center". First test which stats.nba.com endpoint has them: one request for every player, or one per player (about 5,000) for birth dates.
+- Out of scope, and the AI should refuse: awards, coaches, arenas, attendance, salaries, injuries, trades, play-by-play. Conferences and standings are possible later (about one request per season).
 
-**11. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+**11. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
 
-**12. Accuracy test.**
+**12. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+
+**13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+
+**14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
 - They run against a frozen copy of a few seasons, so the correct answers never change. The output is a score like "27/30".
 - It runs only when triggered by hand, to save the free AI allowance.
 
-**13. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
+**15. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
 - Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
-**14. Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
+**16. Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
 
-**15. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
+**17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
 
-**16. Automatic deploys** whenever code is merged to `main`.
+**18. Automatic deploys** whenever code is merged to `main`.
 
-**17. Daily update.** A scheduled task on your laptop fetches the current season, upserts it, and clears the cache. Missed days catch up automatically.
+**19. Daily update.** A scheduled task on your laptop fetches the current season, upserts it, and clears the cache. Missed days catch up automatically.
 
-**18. Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
+**20. Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
 
 ---
 
@@ -179,8 +186,8 @@ On your laptop:
 - **Upload the code as a zip, not a Docker image.** Simpler on AWS. Docker is still used locally and in testing.
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
 - **The one-sentence AI summary is off by default.** It would double AI usage per question.
-- **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 17.
-- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 11, 12) and storage: 305 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 15.
+- **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 19.
+- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 13, 14) and storage: 305 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 17.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
 
 ## How we'll know it works
