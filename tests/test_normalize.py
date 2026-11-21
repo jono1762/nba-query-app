@@ -9,6 +9,7 @@ from nba_query_app.ingest.normalize import (
     REQUIRED_STATS,
     NormalizeError,
     _resolve_duplicate_player_rows,
+    _teams_without_minutes,
     normalize_league_game_log,
     parse_is_home,
     season_from_id,
@@ -283,12 +284,66 @@ def test_minutes_missing_from_the_source_are_not_counted_as_a_cleanup(response: 
     assert normalize_league_game_log(response).cleanups == {}
 
 
-def test_single_zero_minute_player_is_a_real_zero(response: dict) -> None:
+def column(response: dict, name: str, row_index: int):
+    headers = response["resultSets"][0]["headers"]
+    return response["resultSets"][0]["rowSet"][row_index][headers.index(name)]
+
+
+def teammate_of_row_0(response: dict) -> int:
+    return next(
+        i
+        for i in range(1, len(response["resultSets"][0]["rowSet"]))
+        if column(response, "TEAM_ID", i) == column(response, "TEAM_ID", 0)
+        and column(response, "GAME_ID", i) == column(response, "GAME_ID", 0)
+    )
+
+
+def test_zero_minutes_on_a_team_whose_minutes_add_up_is_a_real_zero(response: dict) -> None:
     # Modern data: under 30 seconds on court rounds down to 0. That is real.
+    teammate = teammate_of_row_0(response)
+    total = column(response, "MIN", 0) + column(response, "MIN", teammate)
     set_column(response, "MIN", 0, row_index=0)
+    set_column(response, "MIN", total, row_index=teammate)  # the team still adds up
+
     batch = normalize_league_game_log(response)
+
     assert batch.stats[0].minutes == 0
     assert batch.cleanups == {}
+
+
+def test_zero_minutes_on_a_team_well_short_of_the_game_means_not_recorded(
+    response: dict,
+) -> None:
+    # Early seasons: a player with points but 0 minutes, and the team's minutes
+    # fall far short of 240. The 0 means "not recorded".
+    assert column(response, "MIN", 0) >= 15
+    set_column(response, "MIN", 0, row_index=0)
+
+    batch = normalize_league_game_log(response)
+
+    assert batch.stats[0].minutes is None
+    assert batch.stats[teammate_of_row_0(response)].minutes is not None  # real values stay
+    assert batch.cleanups == {"zero_minutes_not_recorded": 1}
+
+
+@pytest.mark.parametrize(
+    ("team_minutes", "opponent_minutes", "short"),
+    [
+        (240, 240, False),
+        (226, 240, False),  # 14 short: rounding-sized
+        (225, 240, True),  # 15 short
+        (251, 265, False),  # one overtime
+        (250, 265, True),
+        (0, 0, True),  # nothing recorded
+    ],
+)
+def test_which_teams_count_as_short(team_minutes: int, opponent_minutes: int, short: bool) -> None:
+    rows = [
+        {"GAME_ID": "g", "TEAM_ID": 1, "MIN": team_minutes},
+        {"GAME_ID": "g", "TEAM_ID": 1, "MIN": 0},
+        {"GAME_ID": "g", "TEAM_ID": 2, "MIN": opponent_minutes},
+    ]
+    assert ((("g", 1)) in _teams_without_minutes(rows)) is short
 
 
 @pytest.mark.parametrize(

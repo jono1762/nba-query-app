@@ -70,7 +70,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
-  - Early seasons report `MIN = 0` for everyone, so a game where *every* player has 0 minutes becomes NULL minutes. A single 0 is real (under 30 seconds).
+  - Early seasons report `MIN = 0` for players whose minutes weren't recorded (everyone in the earliest years, some players into the early 1980s). So a 0 becomes NULL when its team's minutes fall 15+ short of the game length (240, plus 25 per overtime, judged from the team with more minutes). A 0 on a team whose minutes add up is real (under 30 seconds).
   - Attempts lower than makes (an impossible value in old box scores) become NULL attempts.
 - A W/L missing on one player row is filled in from teammates, or else from the opponent. Every game must end with exactly one winner and one loser (no ties).
 - Home/away per team is a majority vote of its rows. A few old rows are mislabelled.

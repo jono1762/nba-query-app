@@ -56,15 +56,19 @@ games.
     2006-01-22, Dončić 73 on 2024-01-26.
   - Reloading a season changes nothing.
 - **Missing stats are NULL in the source**, never 0, with one exception: early
-  seasons report `MIN = 0` for every player. How complete each stat is, by season
-  (share of rows with a value):
+  seasons report `MIN = 0` when minutes weren't recorded. That's everyone in the
+  earliest years, and some players into the early 1980s (e.g. 20 points in "0
+  minutes"). A 0 is stored as NULL when its team's minutes fall 15+ short of the game
+  length (240, plus 25 per overtime). That turned about 20,500 more rows from 0 into
+  "not recorded", almost all before 1985, and only 5 after 1996. How complete each
+  stat is, by season (share of rows with a value):
 
   | Season | Minutes | Rebounds | Assists | Steals | Blocks | Turnovers | 3PA |
   |---|---|---|---|---|---|---|---|
-  | 1946-47 | 0% | 0% | 2% | 0% | 0% | 0% | 0% |
-  | 1960-61 | 60% | 69% | 38% | 0% | 0% | 0% | 0% |
-  | 1973-74 | 88% | 92% | 92% | 28% | 31% | 0% | 0% |
-  | 1979-80 | 99% | 99% | 98% | 72% | 82% | 65% | 85% |
+  | 1946-47 | 0% | 0% | 4% | 0% | 0% | 0% | 0% |
+  | 1960-61 | 30% | 71% | 39% | 0% | 0% | 0% | 0% |
+  | 1973-74 | 85% | 93% | 92% | 28% | 32% | 0% | 0% |
+  | 1979-80 | 99% | 99% | 98% | 71% | 82% | 66% | 86% |
   | 1985-86 | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
 
   Coverage rises gradually and is often partial within a season. The exact
@@ -177,7 +181,7 @@ every season from then on has the stat in at least 98% of player rows.
 
 - **Why 98% and not 99%:** 1984-85 sits at about 98.5% for most stats. A few
   players have partial box scores all season (e.g. Eddie Johnson, Kansas City Kings:
-  73 games with points but no rebounds and 0 minutes). At 99%, every stat would
+  73 games with points but no rebounds or minutes). At 99%, every stat would
   start in 1985-86.
 - Steals, turnovers and offensive/defensive rebounds each have one to three stray
   values years before the league started counting them (first recorded 1962-63 to
