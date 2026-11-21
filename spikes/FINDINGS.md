@@ -1,4 +1,6 @@
-# Phase 0 spike findings
+# Spike findings
+
+Experiments and data investigations. The first sections are step 1 of `docs/PLAN.md`.
 
 Run on 2026-11-18 from a home connection (WSL2 on Windows).
 
@@ -30,7 +32,7 @@ Run on 2026-11-18 from a home connection (WSL2 on Windows).
   but there's no reason to expect it to work better.
 
 ## What this means for the plan
-- The history download (Phase 2) works as planned.
+- The history download (step 5) works as planned.
 - **Decision (2026-11-18): use stats.nba.com only.** It handles both the history
   download and the daily update. The daily update runs as a scheduled task on a
   home machine instead of in AWS. Each run fetches the whole current season in
@@ -74,7 +76,7 @@ games. The 2000-01 to now load above was the first step.
   | 1979-80 | 99% | 99% | 98% | 72% | 82% | 65% | 85% |
   | 1985-86 | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
 
-  Coverage rises gradually and is often partial within a season. Phase 2c will
+  Coverage rises gradually and is often partial within a season. Step 7 will
   compute exact "fully recorded from" seasons per stat.
 
 - **Errors in old box scores, and how they're handled** (each found in the real

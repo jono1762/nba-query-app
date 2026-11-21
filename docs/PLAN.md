@@ -19,24 +19,30 @@ Decisions:
 
 ## Progress
 
-| Phase | What | Status |
+Steps are numbered in build order. (Until 2026-11-21 they were "phases" with
+letters. Old commit messages use those labels: Phase 0 = step 1, 1a = 2, 1b = 3,
+2a = 4, 2b = 5, Cup rounds = 6, 2c = 7, 3 = 8, 4a = 9, 4b = 10, 5 = 11, 6 = 12,
+7 = 13, 8a = 14, 8b = 15, 9 = 16, 10 = 17.)
+
+| Step | What | Status |
 |---|---|---|
-| 0 | Data-source spikes (stats.nba.com, cdn.nba.com) | Done, see `spikes/FINDINGS.md` |
-| 0 | Gemini and Neon spikes | Not started (needs keys) |
-| 1a | Project skeleton, lint, tests, Docker Postgres, CI | Done |
-| 1b | Tables and database roles | Done |
-| 2a | Convert NBA data into table rows; idempotent loader | Done |
-| 2b | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
-| 2b+ | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
-| 2c | Season-totals view and spot-checks | Next |
-| 3 | SQL safety checker | |
-| 4 | Connect Gemini | |
-| 5 | Accuracy test | |
-| 6 | Web API | |
-| 7 | Webpage | |
-| 8 | AWS deploy (and copy the data to Neon) | |
-| 9 | Daily update | |
-| 10 | Polish | |
+| 1 | Data-source tests (stats.nba.com, cdn.nba.com) | Done, see `spikes/FINDINGS.md` |
+| 2 | Project skeleton, lint, tests, Docker Postgres, CI | Done |
+| 3 | Tables and database roles | Done |
+| 4 | Convert NBA data into table rows; safe reloads | Done |
+| 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
+| 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
+| 7 | Season totals and data-quality checks | Next |
+| 8 | SQL safety checker | |
+| 9 | Connect Gemini (command-line first) | |
+| 10 | Retries, refusals, cost logging | |
+| 11 | Accuracy test | |
+| 12 | Web API, plus `docs/ARCHITECTURE.md` | |
+| 13 | Webpage | |
+| 14 | Neon setup and first AWS deploy | |
+| 15 | Automatic deploys | |
+| 16 | Daily update | |
+| 17 | Polish | |
 
 ---
 
@@ -101,64 +107,64 @@ On your laptop:
    - It may only touch the NBA stats tables, not Postgres's built-in system tables.
    - No dangerous functions.
    - At most 100 rows are returned.
-6. **Run it** as the read-only database user, with a 5-second time limit. Even if step 5 missed something, the database itself refuses any writes.
+6. **Run it** as the read-only database user, with a 5-second time limit. Even if the safety check missed something, the database itself refuses any writes.
 7. **If the query errors,** send the error back to Gemini to fix, at most 2 times, then give up cleanly.
 8. **Show** the results table, the SQL (behind a "Show SQL" toggle), and optionally a one-sentence summary. The summary is off by default because it needs a second AI call.
 9. **Log** each request: question, SQL, success or failure, retries, AI tokens used, estimated cost, and time taken.
 
 ---
 
-## Build order (each bullet is roughly one branch)
+## Build order (each step is roughly one branch)
 
-**Phase 0: Quick experiments**
-- Done: stats.nba.com returns a whole season in one request and works from home. cdn.nba.com is blocked (403).
-- Still to do: Gemini (which model is free, its limits, whether the fixed reply format is reliable) and Neon (connection, wake-up delay). These need the keys.
+**1. Data-source tests.** Done: stats.nba.com returns a whole season in one request and works from home. cdn.nba.com is blocked (403).
 
-**Phase 1: Foundation**
-- 1a: Project skeleton, code-style checker, test runner, Docker Postgres, GitHub Actions. Done.
-- 1b: Tables, database users, and tests proving the read-only user can't change data. Done.
+**2. Project skeleton.** Code-style checker, test runner, Docker Postgres, GitHub Actions. Done.
 
-**Phase 2: Load the data**
-- 2a: Convert NBA's data into our tables; loading twice changes nothing. Handles neutral-site games and team renames. Done.
-- 2b: History download command for every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens when we deploy (Phase 8).
-- 2c: Season totals and data quality.
-  - Season-totals view, and spot-checks against well-known real numbers.
-  - **"Tracked since" table**, calculated from the data rather than typed-in dates (e.g. "first season where ≥ 99% of rows have blocks"). It drives the AI's refuse-or-caveat rules. Coverage ramps up gradually and unevenly, so these are *not* hard database rules.
-  - **Data-quality checks** (a script that runs after loading, plus tests). They report violations for a person to look at; they don't block the load. They flag:
-    - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
-    - *Stats that disappear* after being fully recorded.
-    - *Implausible numbers:* a player's points ≠ 2 × (FGM − FG3M) + 3 × FG3M + FTM where all are recorded (FGM includes 3-pointers, so 2-pointers are FGM − FG3M), extreme single-game values.
-    - *Team totals that don't add up* within a game, and any game without exactly one winner and one loser (also enforced when loading).
-    - *Games per team per season*, the closest we can get to proving no games are missing:
-      - Count each team's regular-season games and compare with that season's schedule length (82 in modern seasons; it changed over history).
-      - Report seasons where teams' counts differ. Some are real: early seasons with uneven schedules, the 2012-13 Celtics–Pacers game cancelled after the Boston Marathon bombing, and the COVID-shortened 2019-20. A small list of known exceptions keeps the report quiet for those, so anything else stands out.
-  - **Count every time a cleanup rule fires** during loading (attempts made "not recorded", W/L filled in, home/away majority votes, ghost rows dropped), so the totals in `spikes/FINDINGS.md` are exact rather than only the cases that first caused errors.
-  - If a check finds something, look at the actual rows and decide, as with the old box-score errors in Phase 2b.
+**3. Tables and database roles,** with tests proving the read-only user can't change data. Done.
 
-**Phase 3: Safety checker (no AI yet)**
-- The SQL checker, with many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+**4. Convert NBA data into rows.** Loading twice changes nothing. Handles neutral-site games and team renames. Done.
 
-**Phase 4: Connect the AI**
-- 4a: Build the AI instructions and call Gemini. A command-line version comes first.
-- 4b: Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+**5. Full history download.** Every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens in step 14.
 
-**Phase 5: Accuracy test**
+**6. NBA Cup rounds.** Each Cup game is tagged as group, quarterfinal, semifinal or final. Done.
+
+**7. Season totals and data quality.**
+- Season-totals view, and spot-checks against well-known real numbers.
+- **"Tracked since" table**, calculated from the data rather than typed-in dates (e.g. "first season where ≥ 99% of rows have blocks"). It drives the AI's refuse-or-caveat rules. Coverage ramps up gradually and unevenly, so these are *not* hard database rules.
+- **Data-quality checks** (a script that runs after loading, plus tests). They report violations for a person to look at; they don't block the load. They flag:
+  - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
+  - *Stats that disappear* after being fully recorded.
+  - *Implausible numbers:* a player's points ≠ 2 × (FGM − FG3M) + 3 × FG3M + FTM where all are recorded (FGM includes 3-pointers, so 2-pointers are FGM − FG3M), extreme single-game values.
+  - *Team totals that don't add up* within a game, and any game without exactly one winner and one loser (also enforced when loading).
+  - *Games per team per season*, the closest we can get to proving no games are missing:
+    - Count each team's regular-season games and compare with that season's schedule length (82 in modern seasons; it changed over history). In NBA Cup seasons every team should still have exactly 82, with the two finalists also having one "NBA Cup Final" game.
+    - Report seasons where teams' counts differ. Some are real: early seasons with uneven schedules, the 2012-13 Celtics–Pacers game cancelled after the Boston Marathon bombing, and the COVID-shortened 2019-20. A small list of known exceptions keeps the report quiet for those, so anything else stands out.
+- **Count every time a cleanup rule fires** during loading (attempts made "not recorded", W/L filled in, home/away majority votes, ghost rows dropped), so the totals in `spikes/FINDINGS.md` are exact rather than only the cases that first caused errors.
+- If a check finds something, look at the actual rows and decide, as with the old box-score errors in step 5.
+
+**8. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+
+**9. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+
+**10. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+
+**11. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
 - They run against a frozen copy of a few seasons, so the correct answers never change. The output is a score like "27/30".
 - It runs only when triggered by hand, to save the free AI allowance.
 
-**Phase 6: Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
+**12. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
 - Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
-**Phase 7: Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
+**13. Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
 
-**Phase 8: Put it on AWS**
-- 8a: Set up Neon and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
-- 8b: Automatic deploy whenever code is merged to `main`.
+**14. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
 
-**Phase 9: Daily update.** A scheduled task on your laptop fetches the current season, upserts it, and clears the cache. Missed days catch up automatically.
+**15. Automatic deploys** whenever code is merged to `main`.
 
-**Phase 10: Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
+**16. Daily update.** A scheduled task on your laptop fetches the current season, upserts it, and clears the cache. Missed days catch up automatically.
+
+**17. Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
 
 ---
 
@@ -170,8 +176,8 @@ On your laptop:
 - **Upload the code as a zip, not a Docker image.** Simpler on AWS. Docker is still used locally and in testing.
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
 - **The one-sentence AI summary is off by default.** It would double AI usage per question.
-- **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in Phase 2c and Phase 9.
-- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (Phases 2c, 4, 5) and 305 MB instead of 140 MB, about 60% of Neon's free 0.5 GB. Check the real limit in Phase 8.
+- **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 16.
+- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 10, 11) and 305 MB instead of 140 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 14.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
 
 ## How we'll know it works
