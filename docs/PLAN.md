@@ -128,6 +128,10 @@ On your laptop:
     - *Stats that disappear* after being fully recorded.
     - *Implausible numbers:* a player's points ≠ 2×FGM + FG3M + FTM where all are recorded, extreme single-game values.
     - *Team totals that don't add up* within a game, and any game without exactly one winner and one loser (also enforced when loading).
+    - *Games per team per season*, the closest we can get to proving no games are missing:
+      - Count each team's regular-season games and compare with that season's schedule length (82 in modern seasons; it changed over history).
+      - Report seasons where teams' counts differ. Some are real: early seasons with uneven schedules, the 2012-13 Celtics–Pacers game cancelled after the Boston Marathon bombing, and the COVID-shortened 2019-20. A small list of known exceptions keeps the report quiet for those, so anything else stands out.
+  - **Count every time a cleanup rule fires** during loading (attempts made "not recorded", W/L filled in, home/away majority votes, ghost rows dropped), so the totals in `spikes/FINDINGS.md` are exact rather than only the cases that first caused errors.
   - If a check finds something, look at the actual rows and decide, as with the old box-score errors in Phase 2b.
 
 **Phase 3: Safety checker (no AI yet)**
