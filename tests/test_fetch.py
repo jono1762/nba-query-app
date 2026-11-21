@@ -60,8 +60,10 @@ def test_rejects_unknown_season_type() -> None:
         fetch_league_game_log("2026-27", "Preseason", request=FakeRequests(), sleep=lambda s: None)
 
 
-def test_play_in_uses_the_api_spelling(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = {}
+@pytest.fixture
+def endpoint_args(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Replaces the nba_api endpoint with a fake; returns the arguments it was called with."""
+    seen: dict = {}
 
     class FakeEndpoint:
         def __init__(self, **kwargs):
@@ -71,26 +73,20 @@ def test_play_in_uses_the_api_spelling(monkeypatch: pytest.MonkeyPatch) -> None:
             return GOOD
 
     monkeypatch.setattr("nba_query_app.ingest.fetch.leaguegamelog.LeagueGameLog", FakeEndpoint)
+    return seen
+
+
+def test_play_in_uses_the_api_spelling(endpoint_args: dict) -> None:
     fetch_league_game_log("2025-26", "Play-In", sleep=lambda s: None)
 
-    assert seen["season_type_all_star"] == "PlayIn"
-    assert seen["player_or_team_abbreviation"] == "P"
+    assert endpoint_args["season_type_all_star"] == "PlayIn"
+    assert endpoint_args["player_or_team_abbreviation"] == "P"
 
 
-def test_team_level_asks_for_one_row_per_team(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen = {}
-
-    class FakeEndpoint:
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-        def get_dict(self):
-            return GOOD
-
-    monkeypatch.setattr("nba_query_app.ingest.fetch.leaguegamelog.LeagueGameLog", FakeEndpoint)
+def test_team_level_asks_for_one_row_per_team(endpoint_args: dict) -> None:
     fetch_league_game_log("2025-26", "Regular Season", "team", sleep=lambda s: None)
 
-    assert seen["player_or_team_abbreviation"] == "T"
+    assert endpoint_args["player_or_team_abbreviation"] == "T"
 
 
 def test_rejects_unknown_level() -> None:
