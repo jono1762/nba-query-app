@@ -13,7 +13,9 @@ from psycopg import sql
 ConnectAs = Callable[[str], psycopg.Connection]
 
 
-@pytest.mark.parametrize("table", ["teams", "players", "games", "player_game_stats", "meta"])
+@pytest.mark.parametrize(
+    "table", ["teams", "players", "games", "player_game_stats", "meta", "player_season_stats"]
+)
 def test_reader_can_select_every_table(connect_as: ConnectAs, table: str) -> None:
     reader = connect_as("nba_reader")
     reader.execute(sql.SQL("SELECT * FROM nba.{}").format(sql.Identifier(table)))

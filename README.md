@@ -38,6 +38,8 @@ uv run --env-file .env python -m nba_query_app.ingest.backfill --help          #
 - `nba` schema: `teams`, `players`, `games`, `player_game_stats` (one row per
   player per team per game, from 1946-47), and `meta` (data version and newest game date).
   Stats that weren't recorded in early seasons are NULL ("not recorded"), not 0.
+- `nba.player_season_stats` view: season totals per player, calculated from the game
+  rows. A total is NULL unless the stat was recorded in every one of the player's games.
 - Roles (permission groups, no passwords):
   - `nba_reader`: read-only. All LLM-written SQL runs as a member of this role.
   - `nba_ingest`: can load data, but not change table structure.

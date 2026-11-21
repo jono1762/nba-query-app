@@ -27,7 +27,7 @@ Decisions:
 | 4 | Convert NBA data into table rows; safe reloads | Done |
 | 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
-| 7 | Season totals and data-quality checks | Next |
+| 7 | Season totals and data-quality checks | In progress: season-totals view done |
 | 8 | SQL safety checker | |
 | 9 | Connect Gemini (command-line first) | |
 | 10 | Retries, refusals, cost logging | |

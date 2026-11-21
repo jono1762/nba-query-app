@@ -10,6 +10,7 @@ Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
 - stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB. NBA Cup games are tagged with their round.
+- season-totals view
 
 Not built yet:
 - SQL safety checker
@@ -77,6 +78,8 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `MIN` is a whole number. Shooting percentages from the source are ignored, since they can be derived.
 - Bad input raises `NormalizeError` rather than loading partial data.
 - When data trips a new rule, dry-run fetch + normalize over all seasons (no DB) to find every case at once, then look at the actual rows before writing a rule. Several "obvious" rules here turned out to drop real stats.
+
+**Season totals** are the view `nba.player_season_stats` (one row per player, season and season type, all teams combined), calculated from the game rows so the two always agree. A total is NULL unless the stat was recorded in every one of the player's games that season, so partial coverage never undercounts. It's a plain view, not a stored copy: a full-history scan takes about 0.5 s locally.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 
