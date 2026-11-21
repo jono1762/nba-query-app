@@ -118,3 +118,16 @@ def test_nba_cup_final_is_a_valid_season_type(migrated: psycopg.Connection) -> N
         "INSERT INTO nba.games VALUES "
         "('0062400001', '2024-12-17', '2024-25', 'NBA Cup Final', 1, 2)"
     )
+
+
+def test_final_round_only_on_cup_final_games(migrated: psycopg.Connection) -> None:
+    insert_sample_game(migrated)
+    with pytest.raises(psycopg.errors.CheckViolation):
+        migrated.execute("UPDATE nba.games SET nba_cup_round = 'Final'")  # a regular-season game
+
+
+def test_cup_final_game_cannot_have_another_round(migrated: psycopg.Connection) -> None:
+    insert_sample_game(migrated)
+    migrated.execute("UPDATE nba.games SET season_type = 'NBA Cup Final'")
+    with pytest.raises(psycopg.errors.CheckViolation):
+        migrated.execute("UPDATE nba.games SET nba_cup_round = 'Semifinal'")

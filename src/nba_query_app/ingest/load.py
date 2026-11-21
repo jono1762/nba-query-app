@@ -98,3 +98,32 @@ def load_batch(conn: psycopg.Connection, batch: Batch) -> LoadResult:
             latest = max((game.game_date for game in batch.games), default=None)
             cur.execute(BUMP_META, (latest,))
     return result
+
+
+SET_CUP_ROUND = """
+UPDATE nba.games SET nba_cup_round = %s
+WHERE game_id = %s AND nba_cup_round IS DISTINCT FROM %s
+"""
+
+
+def load_cup_rounds(conn: psycopg.Connection, rounds: dict[str, str]) -> int:
+    """Tag stored games with their NBA Cup round. Returns how many games changed.
+
+    The games themselves must already be loaded: group, quarterfinal and semifinal
+    games come from the regular season, the final from the NBA Cup Final load.
+    """
+    if not rounds:
+        return 0
+    with conn.transaction(), conn.cursor() as cur:
+        cur.execute("SELECT game_id FROM nba.games WHERE game_id = ANY(%s)", (list(rounds),))
+        missing = set(rounds) - {game_id for (game_id,) in cur.fetchall()}
+        if missing:
+            raise ValueError(
+                f"{len(missing)} Cup game(s) aren't loaded yet, e.g. {sorted(missing)[0]}; "
+                "load the regular season and the NBA Cup final first"
+            )
+        cur.executemany(SET_CUP_ROUND, [(name, game_id, name) for game_id, name in rounds.items()])
+        changed = cur.rowcount
+        if changed:
+            cur.execute(BUMP_META, (None,))
+    return changed

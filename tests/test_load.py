@@ -9,7 +9,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from nba_query_app.ingest.load import load_batch
+from nba_query_app.ingest.load import load_batch, load_cup_rounds
 from nba_query_app.ingest.normalize import Batch, normalize_league_game_log
 
 FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games.json"
@@ -177,3 +177,40 @@ def test_player_can_have_rows_for_both_teams_in_one_game(
         (first.game_id, first.player_id),
     ).fetchone()[0]
     assert count == 2
+
+
+def test_cup_rounds_tag_stored_games(ingest: psycopg.Connection, batch: Batch) -> None:
+    load_batch(ingest, batch)
+    rounds = {batch.games[0].game_id: "Group", batch.games[1].game_id: "Quarterfinal"}
+
+    assert load_cup_rounds(ingest, rounds) == 2
+    stored = dict(ingest.execute("SELECT game_id, nba_cup_round FROM nba.games").fetchall())
+    assert stored == rounds
+    assert meta(ingest)[0] == 2  # data version bumped once for the change
+
+
+def test_cup_rounds_twice_change_nothing(ingest: psycopg.Connection, batch: Batch) -> None:
+    load_batch(ingest, batch)
+    rounds = {batch.games[0].game_id: "Group"}
+    load_cup_rounds(ingest, rounds)
+
+    assert load_cup_rounds(ingest, rounds) == 0
+    assert meta(ingest)[0] == 2
+
+
+def test_cup_rounds_for_games_not_loaded_is_an_error(ingest: psycopg.Connection) -> None:
+    with pytest.raises(ValueError, match="aren't loaded yet"):
+        load_cup_rounds(ingest, {"0022400999": "Group"})
+
+
+def test_reloading_a_cup_game_keeps_its_round(ingest: psycopg.Connection, batch: Batch) -> None:
+    # The round isn't part of the Game dataclass, so a regular-season reload leaves it alone.
+    load_batch(ingest, batch)
+    load_cup_rounds(ingest, {batch.games[0].game_id: "Semifinal"})
+    corrected = dataclasses.replace(batch.stats[0], pts=batch.stats[0].pts + 1)
+    load_batch(ingest, dataclasses.replace(batch, stats=[corrected]))
+
+    round_ = ingest.execute(
+        "SELECT nba_cup_round FROM nba.games WHERE game_id = %s", (batch.games[0].game_id,)
+    ).fetchone()[0]
+    assert round_ == "Semifinal"
