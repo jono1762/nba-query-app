@@ -11,6 +11,7 @@ Built so far:
 - `nba` schema and database roles
 - stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB. NBA Cup games are tagged with their round.
 - season-totals view, and stat-coverage views ("tracked since")
+- data-quality checks
 
 Not built yet:
 - SQL safety checker
@@ -34,6 +35,7 @@ uv run --env-file .env pytest                          # all tests
 uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated   # one test
 
 uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
+uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
 ```
 
 The backfill makes real requests to stats.nba.com (about 170 for the full history, roughly 5 minutes). Run it only when data is actually needed.
@@ -83,6 +85,8 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 **Season totals** are the view `nba.player_season_stats` (one row per player, season and season type, all teams combined), calculated from the game rows so the two always agree. A total is NULL unless the stat was recorded in every one of the player's games that season, so partial coverage never undercounts. It's a plain view, not a stored copy: a full-history scan takes about 0.5 s locally.
 
 **Stat coverage.** `nba.stat_coverage` (share of player rows with each stat, per season) and `nba.stat_tracked_since` (per stat: first season with any value, and the first season from which every season is at least 98% recorded) are computed from the data, never typed in. They drive the refuse-or-caveat rules for early seasons. The threshold is 98%, not 99%, because 1984-85 sits at about 98.5% for most stats (a few players have partial box scores all season).
+
+**Data-quality checks** (`quality.py`) are SQL queries that each return `(key, detail)` rows, one per violation: impossible values, points or rebounds that don't add up, values above all-time records, winners with fewer points, team minutes well short of the game length (usually a player row missing from the source), uneven games per team, and so on. They only report; they never block a load or change data. Violations that were investigated and accepted go in `KNOWN_EXCEPTIONS` (a regex on the key, plus the reason), so new problems stand out. Queries get a `%(current_season)s` parameter, so a literal `%` must be written `%%`. The exit code is 1 if anything unexplained is found.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 

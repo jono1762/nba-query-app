@@ -5,7 +5,8 @@ just this command for the current season).
 
 Each season and season type is fetched, converted and saved on its own, in one
 transaction. If the run stops partway, run it again: seasons already saved are
-re-checked quickly and unchanged rows are left alone.
+re-checked quickly and unchanged rows are left alone. At the end, the data-quality
+checks (nba_query_app.quality) run over the whole database and print a report.
 
 Usage:
     uv run --env-file .env python -m nba_query_app.ingest.backfill                # 1946-47 to now
@@ -28,6 +29,7 @@ from nba_query_app.ingest.cup import cup_rounds, final_only
 from nba_query_app.ingest.fetch import SEASON_TYPES, fetch_league_game_log
 from nba_query_app.ingest.load import LoadResult, load_batch, load_cup_rounds
 from nba_query_app.ingest.normalize import CLEANUP_RULES, normalize_league_game_log
+from nba_query_app.quality import report, run_checks
 from nba_query_app.seasons import season_for_date, season_start_year, seasons_between
 
 FIRST_SEASON = "1946-47"  # the first BAA season; the BAA became the NBA in 1949
@@ -137,6 +139,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         version, latest = conn.execute(
             "SELECT data_version, latest_game_date FROM nba.meta"
         ).fetchone()
+        quality = run_checks(conn, season_for_date(date.today()))
 
     total_rows = sum(r.rows_fetched for r in results)
     total_changed = sum(r.loaded.stats for r in results)
@@ -149,6 +152,7 @@ def main(argv: Sequence[str] | None = None) -> None:
         print("Cleanup rules fired:")
         for name, description in CLEANUP_RULES.items():
             print(f"  {cleanups[name]:>6}  {description}")
+    report(quality)  # reports only; problems never undo the load
 
 
 if __name__ == "__main__":

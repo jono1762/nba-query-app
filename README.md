@@ -30,7 +30,12 @@ connection. A whole season is one request. Reruns are safe: unchanged rows are s
 uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~5 min)
 uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27  # just the current season
 uv run --env-file .env python -m nba_query_app.ingest.backfill --help          # all options
+uv run --env-file .env python -m nba_query_app.quality                         # data-quality report
 ```
+
+The backfill ends with the data-quality report. It flags impossible or suspicious data
+(e.g. a team whose player minutes don't add up) for a person to look at; it never
+blocks a load.
 
 ## Database
 
@@ -52,7 +57,8 @@ uv run --env-file .env python -m nba_query_app.ingest.backfill --help          #
 ## Project layout
 
 ```
-src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading)
+src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading,
+                     quality.py: data-quality checks)
 migrations/          database schema changes (numbered SQL files)
 tests/               automated tests
 docs/PLAN.md         the build plan, decisions and progress
