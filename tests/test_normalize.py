@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -8,9 +9,11 @@ from nba_query_app.ingest.normalize import (
     OPTIONAL_STATS,
     REQUIRED_STATS,
     NormalizeError,
+    TeamGameStats,
     _resolve_duplicate_player_rows,
     _teams_without_minutes,
     normalize_league_game_log,
+    normalize_team_game_log,
     parse_is_home,
     season_from_id,
 )
@@ -489,3 +492,91 @@ def test_every_game_has_one_winner_and_one_loser(response: dict) -> None:
     for game_id in {s.game_id for s in stats}:
         results = {s.team_id: s.won for s in stats if s.game_id == game_id}
         assert sorted(results.values()) == [False, True]
+
+
+# --- Team-level log -------------------------------------------------------------
+
+TEAM_FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games_team.json"
+
+
+@pytest.fixture
+def team_response() -> dict:
+    """The team-level rows for the same two games: BOS 113 @ DET 121, PHI 106 @ NYK 100."""
+    return json.loads(TEAM_FIXTURE.read_text())
+
+
+def team_rows(team_response: dict) -> dict[int, TeamGameStats]:
+    return {t.team_id: t for t in normalize_team_game_log(team_response)}
+
+
+def test_team_rows_have_scores_and_totals(team_response: dict) -> None:
+    rows = team_rows(team_response)
+
+    det = rows[DET]
+    assert (det.game_id, det.opponent_team_id) == ("0022600001", BOS)
+    assert (det.is_home, det.won) == (True, True)
+    assert (det.pts, det.opponent_pts, det.minutes) == (121, 113, 240)
+    assert (det.fgm, det.fga, det.fg3m, det.ftm, det.reb, det.ast) == (39, 86, 15, 28, 49, 27)
+    assert (rows[BOS].is_home, rows[BOS].won, rows[BOS].opponent_pts) == (False, False, 121)
+
+
+def test_team_rows_come_with_the_player_batch(response: dict, team_response: dict) -> None:
+    batch = normalize_league_game_log(response, team_response)
+    assert len(batch.team_stats) == 4
+    assert batch.cleanups == {}
+
+
+def test_team_log_with_a_game_the_player_log_lacks_is_an_error(
+    response: dict, team_response: dict
+) -> None:
+    set_team_column(team_response, "GAME_ID", "0022600099", row_index=0)
+    set_team_column(team_response, "GAME_ID", "0022600099", row_index=2)
+    with pytest.raises(NormalizeError, match="player log doesn't"):
+        normalize_league_game_log(response, team_response)
+
+
+def set_team_column(team_response: dict, column: str, value, row_index: int) -> None:
+    set_column(team_response, column, value, row_index)  # same response shape
+
+
+# Row order in the team fixture: BOS, PHI, DET, NYK.
+def test_unrecorded_team_minutes_are_none(team_response: dict) -> None:
+    set_team_column(team_response, "MIN", 0, row_index=2)
+    assert team_rows(team_response)[DET].minutes is None
+
+
+def test_neutral_site_team_rows(team_response: dict) -> None:
+    set_team_column(team_response, "MATCHUP", "DET @ BOS", row_index=2)
+    rows = team_rows(team_response)
+    assert rows[DET].is_home is None and rows[BOS].is_home is None
+
+
+def test_missing_team_result_is_filled_in_from_the_opponent(team_response: dict) -> None:
+    set_team_column(team_response, "WL", None, row_index=0)
+    cleanups: Counter[str] = Counter()
+    rows = {t.team_id: t for t in normalize_team_game_log(team_response, cleanups)}
+    assert rows[BOS].won is False
+    assert +cleanups == {"win_loss_filled_in": 1}
+
+
+def test_unplayed_game_is_dropped(team_response: dict) -> None:
+    # Real example: the 2012-13 BOS-IND game, cancelled, listed with no W/L and 0-0.
+    for i in (0, 2):
+        set_team_column(team_response, "WL", None, row_index=i)
+        set_team_column(team_response, "PTS", 0, row_index=i)
+    cleanups: Counter[str] = Counter()
+    rows = normalize_team_game_log(team_response, cleanups)
+    assert {t.game_id for t in rows} == {"0022600002"}
+    assert +cleanups == {"unplayed_games_dropped": 1}
+
+
+def test_team_result_must_match_the_score(team_response: dict) -> None:
+    set_team_column(team_response, "PTS", 130, row_index=0)  # BOS "lost" 130-121
+    with pytest.raises(NormalizeError, match="doesn't match the score"):
+        normalize_team_game_log(team_response)
+
+
+def test_team_log_needs_two_teams_per_game(team_response: dict) -> None:
+    team_response["resultSets"][0]["rowSet"].pop(0)
+    with pytest.raises(NormalizeError, match="expected 2"):
+        normalize_team_game_log(team_response)

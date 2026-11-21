@@ -1,9 +1,11 @@
-"""Turn a stats.nba.com LeagueGameLog response into rows for our tables.
+"""Turn stats.nba.com LeagueGameLog responses into rows for our tables.
 
-The response has one row per player per game. From it we derive:
+The player-level response has one row per player per game. From it we derive:
 - teams and players (with the most recent name seen in this batch),
 - games (date, season, home and away team),
 - box score rows (with opponent, home/away and win/loss worked out).
+The optional team-level response (one row per team per game) gives each team's
+final score and totals.
 
 Many stats weren't recorded in early seasons. Those arrive as null and stay None
 ("not recorded", which is different from 0). The one exception is minutes: early
@@ -93,6 +95,34 @@ class PlayerGameStats:
     plus_minus: int | None
 
 
+@dataclass(frozen=True)
+class TeamGameStats:
+    game_id: str
+    team_id: int
+    team_abbreviation: str
+    opponent_team_id: int
+    is_home: bool | None  # None at a neutral site
+    won: bool
+    pts: int
+    opponent_pts: int
+    # None means "not recorded" (common in early seasons):
+    minutes: int | None  # total player minutes: 240, plus 25 per overtime
+    fgm: int | None
+    fga: int | None
+    fg3m: int | None
+    fg3a: int | None
+    ftm: int | None
+    fta: int | None
+    oreb: int | None
+    dreb: int | None
+    reb: int | None
+    ast: int | None
+    stl: int | None
+    blk: int | None
+    tov: int | None
+    pf: int | None
+
+
 # Names of the cleanup rules counted in Batch.cleanups, with what each count means.
 CLEANUP_RULES = {
     "ghost_rows_dropped": "ghost copies of a player listed on both teams, dropped",
@@ -100,6 +130,7 @@ CLEANUP_RULES = {
     "zero_minutes_not_recorded": "0-minute rows on a team whose minutes fall short (now NULL)",
     "attempts_not_recorded": "attempt values lower than the makes (now NULL)",
     "win_loss_filled_in": "rows missing W/L, filled in from teammates or the opponent",
+    "unplayed_games_dropped": "games in the team log with no result and 0-0 (e.g. cancelled)",
 }
 
 
@@ -112,6 +143,8 @@ class Batch:
     # How many times each cleanup rule fired (keys from CLEANUP_RULES; rules that
     # never fired are left out).
     cleanups: Counter[str] = field(default_factory=Counter)
+    # From the team-level log, when one was given.
+    team_stats: list[TeamGameStats] = field(default_factory=list)
 
 
 # Our column name -> stats.nba.com column name.
@@ -172,12 +205,22 @@ def parse_won(wl: str | None) -> bool | None:
     return wl == "W"
 
 
-def normalize_league_game_log(response: dict[str, Any]) -> Batch:
-    """Convert a LeagueGameLog (player mode) response into table rows."""
+def _response_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
     result = response["resultSets"][0]
     headers: list[str] = result["headers"]
-    raw_rows = [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
+    return [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
+
+
+def normalize_league_game_log(
+    response: dict[str, Any], team_response: dict[str, Any] | None = None
+) -> Batch:
+    """Convert a LeagueGameLog player-level response (and optionally the matching
+    team-level one, for the same season and season type) into table rows."""
+    raw_rows = _response_rows(response)
     cleanups: Counter[str] = Counter()
+    team_stats: list[TeamGameStats] = []
+    if team_response is not None:
+        team_stats = normalize_team_game_log(team_response, cleanups)
     rows_before = len(raw_rows)
     raw_rows = _resolve_duplicate_player_rows(raw_rows)
     cleanups["ghost_rows_dropped"] += rows_before - len(raw_rows)
@@ -246,6 +289,9 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
     keys = [(s.game_id, s.player_id, s.team_id) for s in stats]
     if len(keys) != len(set(keys)):  # would silently overwrite each other in the database
         raise NormalizeError("A player appears more than once for the same team in a game")
+    unknown = {t.game_id for t in team_stats} - set(games)
+    if unknown:
+        raise NormalizeError(f"Team log has games the player log doesn't, e.g. {min(unknown)}")
 
     return Batch(
         teams=list(teams.values()),
@@ -253,7 +299,76 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
         games=list(games.values()),
         stats=stats,
         cleanups=+cleanups,  # unary plus drops the rules that never fired
+        team_stats=team_stats,
     )
+
+
+# Team columns that may be missing (not recorded); points are always present.
+TEAM_OPTIONAL_STATS = {
+    column: source
+    for column, source in {**REQUIRED_STATS, **OPTIONAL_STATS}.items()
+    if column not in ("pts", "plus_minus")
+}
+
+
+def normalize_team_game_log(
+    response: dict[str, Any], cleanups: Counter[str] | None = None
+) -> list[TeamGameStats]:
+    """Convert a LeagueGameLog team-level response: one row per team per game.
+
+    Each game must have two teams, one winner and one loser, and the winner must
+    have the higher score. A game listed with no result and 0-0 (the cancelled
+    2012-13 Celtics-Pacers game) is dropped. Cleanup rules that fire are counted
+    in `cleanups` if given.
+    """
+    cleanups = cleanups if cleanups is not None else Counter()
+    by_game: dict[str, list[dict[str, Any]]] = {}
+    for row in _response_rows(response):
+        by_game.setdefault(row["GAME_ID"], []).append(row)
+
+    result = []
+    for game_id, rows in by_game.items():
+        if len(rows) != 2 or rows[0]["TEAM_ID"] == rows[1]["TEAM_ID"]:
+            raise NormalizeError(f"Team log has {len(rows)} rows for game {game_id}, expected 2")
+        if all(r["WL"] is None and not r["PTS"] for r in rows):
+            cleanups["unplayed_games_dropped"] += 1
+            continue
+        if any(r["PTS"] is None for r in rows):
+            raise NormalizeError(f"Team log is missing a score for game {game_id}")
+
+        won = [parse_won(r["WL"]) for r in rows]
+        for i in (0, 1):
+            if won[i] is None and won[1 - i] is not None:
+                won[i] = not won[1 - i]
+                cleanups["win_loss_filled_in"] += 1
+        winner_by_score = [rows[0]["PTS"] > rows[1]["PTS"], rows[1]["PTS"] > rows[0]["PTS"]]
+        if won != winner_by_score:
+            raise NormalizeError(f"Team log result doesn't match the score in game {game_id}")
+
+        home = [parse_is_home(r["MATCHUP"]) for r in rows]
+        if home[0] and home[1]:
+            raise NormalizeError(f"Both teams are listed as home in game {game_id}")
+        neutral = not home[0] and not home[1]
+
+        for i, row in enumerate(rows):
+            other = rows[1 - i]
+            counting = {column: row[source] for column, source in TEAM_OPTIONAL_STATS.items()}
+            counting["minutes"] = counting["minutes"] or None  # 0 means not recorded
+            cleanups["attempts_not_recorded"] += _drop_impossible_attempts(counting)
+            result.append(
+                TeamGameStats(
+                    game_id=game_id,
+                    team_id=row["TEAM_ID"],
+                    team_abbreviation=row["TEAM_ABBREVIATION"],
+                    opponent_team_id=other["TEAM_ID"],
+                    is_home=None if neutral else home[i],
+                    won=won[i],
+                    pts=row["PTS"],
+                    opponent_pts=other["PTS"],
+                    **counting,
+                )
+            )
+    return result
 
 
 def _home_and_away_by_game(

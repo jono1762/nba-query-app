@@ -43,6 +43,8 @@ blocks a load.
 - `nba` schema: `teams`, `players`, `games`, `player_game_stats` (one row per
   player per team per game, from 1946-47), and `meta` (data version and newest game date).
   Stats that weren't recorded in early seasons are NULL ("not recorded"), not 0.
+- `nba.team_game_stats`: one row per team per game (final score and team totals), from
+  the source's team-level log.
 - `nba.player_season_stats` view: season totals per player, calculated from the game
   rows. A total is NULL unless the stat was recorded in every one of the player's games.
 - `nba.stat_coverage` and `nba.stat_tracked_since` views: how completely each stat was

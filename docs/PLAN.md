@@ -28,7 +28,7 @@ Decisions:
 | 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
-| 8 | Team scores and box scores, checked against player rows | Next |
+| 8 | Team scores and box scores, checked against player rows | In progress: table and loader done |
 | 9 | Playoff rounds and series (who won each round, champions) | |
 | 10 | Player details (position, height, birth date, draft) | |
 | 11 | SQL safety checker | |
