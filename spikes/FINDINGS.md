@@ -47,7 +47,7 @@ games.
 - **Load:** 81 seasons × regular season, play-in (from 2019-20) and playoffs. That's
   170 requests in about 5 minutes from an empty database.
 - **Result:** 1,487,560 player-game rows, 73,392 games (37 play-in), 5,159
-  players, 45 franchises. The database is **305 MB**, about 60% of Neon's free 0.5 GB.
+  players, 45 franchises. The database is **286 MB** including the team box scores added later (measured after `VACUUM FULL`, which compacts away space left by reloads), about 56% of Neon's free 0.5 GB.
 - **Sanity checks passed:**
   - 1,230 regular-season games in a normal 30-team season (1,189 in 2000-01
     with 29 teams).

@@ -25,7 +25,7 @@ Decisions:
 | 2 | Project skeleton, lint, tests, Docker Postgres, CI | Done |
 | 3 | Tables and database roles | Done |
 | 4 | Convert NBA data into table rows; safe reloads | Done |
-| 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
+| 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
 | 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
@@ -188,7 +188,7 @@ On your laptop:
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
 - **The one-sentence AI summary is off by default.** It would double AI usage per question.
 - **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 19.
-- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 13, 14) and storage: 305 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 17.
+- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 13, 14) and storage: 286 MB with team box scores, about 56% of Neon's free 0.5 GB. Check the real limit in step 17.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
 
 ## How we'll know it works

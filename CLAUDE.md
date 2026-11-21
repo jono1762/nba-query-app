@@ -9,7 +9,7 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB. NBA Cup games are tagged with their round.
+- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M player rows, 147K team rows and 286 MB. NBA Cup games are tagged with their round.
 - team box scores (final score and team totals) from the team-level log
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
