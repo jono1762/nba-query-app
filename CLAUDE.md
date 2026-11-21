@@ -106,7 +106,10 @@ Consequences of this setup:
 ## Working agreement with the user
 
 - The user reviews every change **commit by commit** in VS Code's Source Control Graph. Work on one branch per feature or phase, with small focused commits, each passing lint and tests on its own.
-- Push the branch and open a PR (`gh pr create`) so CI runs **before** asking for review. After approval, merge with `gh pr merge --merge --delete-branch`, pull `main`, and confirm CI passes on `main`.
+- **Keep branches local until the user says "merge".** Don't push or open a PR before that.
+  - Before asking for review, run what CI runs, locally: `ruff check`, `ruff format --check`, and the full test suite against Postgres, for each commit on its own.
+  - On "merge": push the branch, open a PR (`gh pr create`), wait for CI to pass, then `gh pr merge --merge --delete-branch`, pull `main`, and confirm CI passes on `main`.
+  - If CI fails at that point, stop and show the user the fix before merging.
 - Explain things in plain language and define infrastructure, AWS and database jargon. The user isn't familiar with many of these terms.
 - **Keep docs and comments in sync with the code, in the same commit as the change that affects them.** That covers:
   - `README.md` (commands, layout)
