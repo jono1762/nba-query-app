@@ -81,6 +81,15 @@ games. The 2000-01 to now load above was the first step.
   data and covered by a test):
   - *Attempts lower than makes* (a 1946-47 player with 1 FT made, 0 attempted):
     the attempts become NULL.
+    - Checked whether the column might mean *misses* instead. It doesn't:
+      - These rows are rare: at most 19 of about 6,000 per season, none after 1966-67.
+      - The source's own percentage treats the value as attempts (Bob Feerick
+        1947-48: 4 FT made, 1 attempted, shown as 400%).
+      - League free-throw percentage only matches history under the attempts
+        reading: 1951-52 is 73.5% as attempts vs 42.4% as misses, and the
+        historical figure is about 73%.
+    - So they're recording errors. Some may be misses typed into the wrong
+      column, but nothing proves which, so no value is guessed.
   - *W/L missing on a single player row* (10 rows in 1959-60): filled in from
     teammates.
   - *A couple of rows with the wrong home/away label* (1967-68 SFW at SDR: 10 rows
