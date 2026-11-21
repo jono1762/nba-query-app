@@ -16,46 +16,35 @@ def response(games: list[tuple[str, str, int, int]], final: str | None = None) -
     return {"resultSets": [{"headers": HEADERS, "rowSet": rows}]}
 
 
-def group_stage(teams: list[int]) -> list[tuple[str, str, int, int]]:
-    """Each team plays 4 group games (a round robin over 5 teams, so every team plays 4)."""
-    games, number = [], 0
-    for i, a in enumerate(teams):
-        for b in teams[i + 1 :]:
-            number += 1
-            games.append((f"g{number:02d}", f"2024-11-{number:02d}", a, b))
+def group_stage(group: str, teams: list[int]) -> list[tuple[str, str, int, int]]:
+    """A round robin over 5 teams, so each plays 4 group games. IDs are like 'A01'."""
+    games = []
+    pairs = [(a, b) for i, a in enumerate(teams) for b in teams[i + 1 :]]
+    for number, (a, b) in enumerate(pairs, start=1):
+        games.append((f"{group}{number:02d}", f"2024-11-{number:02d}", a, b))
     return games
 
 
 def test_rounds_follow_each_teams_game_count() -> None:
-    games = group_stage([1, 2, 3, 4, 5]) + [
+    # Two groups of 5 teams (4 group games each), then a bracket, all in date order.
+    knockouts = [
         ("qf1", "2024-12-10", 1, 2),
         ("qf2", "2024-12-10", 3, 4),
-        ("sf1", "2024-12-14", 1, 3),
-        ("final", "2024-12-17", 1, 6),
-    ]
-    # Teams 6-10 form a second group, so team 6 reaches the final with its own QF and SF.
-    games += [
-        ("g6a", "2024-11-20", 6, 7),
-        ("g6b", "2024-11-21", 6, 8),
-        ("g6c", "2024-11-22", 6, 9),
-        ("g6d", "2024-11-23", 6, 10),
-        ("g7a", "2024-11-24", 7, 8),
-        ("g7b", "2024-11-25", 7, 9),
-        ("g7c", "2024-11-26", 7, 10),
-        ("g8a", "2024-11-27", 8, 9),
-        ("g8b", "2024-11-28", 8, 10),
-        ("g9a", "2024-11-29", 9, 10),
         ("qf3", "2024-12-11", 6, 7),
         ("qf4", "2024-12-11", 8, 9),
-        ("sf2", "2024-12-14", 6, 8),
+        ("sf1", "2024-12-14", 1, 3),  # winners of qf1 and qf2
+        ("sf2", "2024-12-14", 6, 8),  # winners of qf3 and qf4
+        ("final", "2024-12-17", 1, 6),
     ]
+    games = group_stage("A", [1, 2, 3, 4, 5]) + group_stage("B", [6, 7, 8, 9, 10]) + knockouts
+
     rounds = cup_rounds(response(games, final="final"))
 
-    assert rounds["g01"] == "Group" and rounds["g6a"] == "Group"
+    assert list(rounds.values()).count("Group") == 20
+    assert rounds["A01"] == "Group" and rounds["B10"] == "Group"
     assert {rounds[g] for g in ("qf1", "qf2", "qf3", "qf4")} == {"Quarterfinal"}
     assert {rounds[g] for g in ("sf1", "sf2")} == {"Semifinal"}
     assert rounds["final"] == "Final"
-    assert list(rounds.values()).count("Group") == 20
 
 
 def test_tournament_in_progress_is_all_group_games() -> None:
@@ -66,7 +55,7 @@ def test_tournament_in_progress_is_all_group_games() -> None:
 
 def test_teams_disagreeing_about_the_round_is_an_error() -> None:
     # Team 1 has 4 earlier games (so this is its quarterfinal), team 9 has none.
-    games = group_stage([1, 2, 3, 4, 5]) + [("odd", "2024-12-10", 1, 9)]
+    games = group_stage("A", [1, 2, 3, 4, 5]) + [("odd", "2024-12-10", 1, 9)]
     with pytest.raises(CupError, match="disagree about the round"):
         cup_rounds(response(games))
 
