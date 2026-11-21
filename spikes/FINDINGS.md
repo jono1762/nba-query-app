@@ -140,3 +140,24 @@ Decision: **official, competitive games only.**
   - For the new format (2024-25 on), the `003…` game IDs mix the All-Star games
     with Rising Stars games, and some return nothing, so the real All-Star games
     can't be identified reliably.
+
+## NBA Cup rounds (2026-11-21)
+- **Why the final doesn't count but the other knockout games do:** the league
+  schedules only 80 games per team in advance (the 4 group games are among them)
+  and leaves 2 December dates open.
+  - Teams that miss the knockouts get 2 extra ordinary games.
+  - Quarterfinal losers get the quarterfinal plus 1 extra game.
+  - Semifinalists play the quarterfinal and semifinal as games 81 and 82.
+  - For the two finalists the final would be game 83, so it's left out of
+    regular-season stats.
+- **Structure in the data** (team-level "IST" logs): every finished Cup had 22
+  teams with 4 Cup games, 4 with 5, 2 with 6 and 2 with 7. So a team's 5th, 6th and
+  7th Cup games are its quarterfinal, semifinal and final. This rule also works
+  while a tournament is in progress: as of 2026-11-21, the 2026-27 Cup has 37
+  group games.
+- **Result:** each finished Cup is tagged as 60 group games, 4 quarterfinals, 2
+  semifinals and 1 final. The brackets chain correctly (2025-26: quarterfinal
+  winners ORL, NYK, OKC, SAS; semifinal winners NYK, SAS; NYK won the final).
+- Tagging needs the games loaded first. During the first run, 9 current-season
+  Cup games played after the last load were refused until the regular season was
+  refreshed. The check worked as intended.

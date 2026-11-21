@@ -27,6 +27,7 @@ Decisions:
 | 1b | Tables and database roles | Done |
 | 2a | Convert NBA data into table rows; idempotent loader | Done |
 | 2b | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
+| 2b+ | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 2c | Season-totals view and spot-checks | Next |
 | 3 | SQL safety checker | |
 | 4 | Connect Gemini | |

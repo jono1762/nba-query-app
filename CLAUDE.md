@@ -9,7 +9,7 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB.
+- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB. NBA Cup games are tagged with their round.
 
 Not built yet:
 - SQL safety checker
@@ -47,9 +47,11 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `ingest/fetch.py` calls stats.nba.com `LeagueGameLog` (player mode), which returns a whole season in one request. It retries with increasing waits and raises `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats`.
 - `ingest/load.py` upserts a `Batch` in one transaction.
+- `ingest/cup.py` (pure) handles the NBA Cup request, which returns *every* Cup game: `final_only` keeps the final's rows for loading, and `cup_rounds` works out each game's round. A team's first 4 Cup games are group games, its 5th the quarterfinal, its 6th the semifinal, its 7th the final. `load.load_cup_rounds` then tags the stored games; it refuses if a Cup game isn't loaded yet, which is why the regular season comes first in `SEASON_TYPES`.
 - Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.
+- The one deliberate exception is `games.nba_cup_round`. It's set by a separate UPDATE and kept out of `Game`, so reloading a regular season can't wipe it. Upserts only touch the columns they list.
 
 **Upserts change only what changed.**
 - `DO UPDATE … WHERE (cols) IS DISTINCT FROM (EXCLUDED cols)` skips unchanged rows.
@@ -61,7 +63,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - **Official, competitive games only** (a deliberate product decision, see `docs/PLAN.md`): exhibitions such as the All-Star game and preseason are excluded.
 - `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in, 6 = NBA Cup final; anything else, including 1 = preseason and 3 = All-Star, is rejected), then the start year. It becomes `'2026-27'`.
   - The API calls play-in `PlayIn` (from 2019-20); we store it as `Play-In`.
-  - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. `fetch.py` keeps only the prefix-6 final, because the other Cup games are regular-season games we already have.
+  - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. Only the prefix-6 final is loaded as box scores, because the group, quarterfinal and semifinal games count as regular-season games we already have. All Cup games get `nba_cup_round` (see `ingest/cup.py`).
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
