@@ -126,7 +126,7 @@ On your laptop:
   - **Data-quality checks** (a script that runs after loading, plus tests). They report violations for a person to look at; they don't block the load. They flag:
     - *Impossible values:* 3-pointers before 1979-80 (no 3-point line yet), play-in before 2019-20.
     - *Stats that disappear* after being fully recorded.
-    - *Implausible numbers:* a player's points ≠ 2×FGM + FG3M + FTM where all are recorded, extreme single-game values.
+    - *Implausible numbers:* a player's points ≠ 2 × (FGM − FG3M) + 3 × FG3M + FTM where all are recorded (FGM includes 3-pointers, so 2-pointers are FGM − FG3M), extreme single-game values.
     - *Team totals that don't add up* within a game, and any game without exactly one winner and one loser (also enforced when loading).
     - *Games per team per season*, the closest we can get to proving no games are missing:
       - Count each team's regular-season games and compare with that season's schedule length (82 in modern seasons; it changed over history).
