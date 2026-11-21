@@ -16,6 +16,7 @@ Usage:
 import argparse
 import os
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -26,7 +27,7 @@ import psycopg
 from nba_query_app.ingest.cup import cup_rounds, final_only
 from nba_query_app.ingest.fetch import SEASON_TYPES, fetch_league_game_log
 from nba_query_app.ingest.load import LoadResult, load_batch, load_cup_rounds
-from nba_query_app.ingest.normalize import normalize_league_game_log
+from nba_query_app.ingest.normalize import CLEANUP_RULES, normalize_league_game_log
 from nba_query_app.seasons import season_for_date, season_start_year, seasons_between
 
 FIRST_SEASON = "1946-47"  # the first BAA season; the BAA became the NBA in 1949
@@ -47,6 +48,7 @@ class SeasonResult:
     season_type: str
     rows_fetched: int
     loaded: LoadResult
+    cleanups: Counter[str]  # how often each normalize cleanup rule fired
 
 
 def backfill(
@@ -86,12 +88,14 @@ def backfill(
         batch = normalize_league_game_log(response)
         loaded = load_batch(conn, batch)
         rounds_changed = load_cup_rounds(conn, rounds)
-        result = SeasonResult(season, season_type, len(batch.stats), loaded)
+        result = SeasonResult(season, season_type, len(batch.stats), loaded, batch.cleanups)
         results.append(result)
         cup_note = f", {len(rounds)} Cup games tagged ({rounds_changed} changed)" if rounds else ""
+        cleanup_note = "".join(f", {name}={n}" for name, n in sorted(batch.cleanups.items()))
         log(
             f"{season} {season_type:<14} {result.rows_fetched:>6} rows, "
-            f"{loaded.stats:>6} new/changed{cup_note}  ({time.perf_counter() - started:.1f}s)"
+            f"{loaded.stats:>6} new/changed{cup_note}{cleanup_note}  "
+            f"({time.perf_counter() - started:.1f}s)"
         )
     return results
 
@@ -140,6 +144,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         f"Done in {time.perf_counter() - started:.0f}s: {total_rows} rows, "
         f"{total_changed} new/changed. Data version {version}, latest game {latest}."
     )
+    cleanups = sum((r.cleanups for r in results), Counter())
+    if cleanups:
+        print("Cleanup rules fired:")
+        for name, description in CLEANUP_RULES.items():
+            print(f"  {cleanups[name]:>6}  {description}")
 
 
 if __name__ == "__main__":

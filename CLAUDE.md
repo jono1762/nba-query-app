@@ -77,6 +77,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
   - Real copies with different scoring are all kept. That's the 1978-11-08 protested 76ers–Nets game, finished after a trade, so the table key is `(game_id, player_id, team_id)`.
 - `MIN` is a whole number. Shooting percentages from the source are ignored, since they can be derived.
 - Bad input raises `NormalizeError` rather than loading partial data.
+- Every time a cleanup rule above fires, it's counted in `Batch.cleanups` (rule names in `normalize.CLEANUP_RULES`). The backfill logs the counts per season and the totals at the end. A new cleanup rule needs a counter too.
 - When data trips a new rule, dry-run fetch + normalize over all seasons (no DB) to find every case at once, then look at the actual rows before writing a rule. Several "obvious" rules here turned out to drop real stats.
 
 **Season totals** are the view `nba.player_season_stats` (one row per player, season and season type, all teams combined), calculated from the game rows so the two always agree. A total is NULL unless the stat was recorded in every one of the player's games that season, so partial coverage never undercounts. It's a plain view, not a stored copy: a full-history scan takes about 0.5 s locally.

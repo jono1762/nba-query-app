@@ -73,6 +73,10 @@ def test_counts(response: dict) -> None:
     assert len(batch.players) == 41
 
 
+def test_clean_data_fires_no_cleanup_rules(response: dict) -> None:
+    assert normalize_league_game_log(response).cleanups == {}
+
+
 def test_games_get_home_and_away_from_matchup(response: dict) -> None:
     games = {g.game_id: g for g in normalize_league_game_log(response).games}
 
@@ -168,14 +172,17 @@ def set_wl_for_team(response: dict, game_id: str, team_id: int, value) -> None:
 def test_missing_win_loss_on_one_player_comes_from_teammates(response: dict) -> None:
     # Real example: 1959-60 box scores with W/L missing on single player rows.
     set_column(response, "WL", None)  # row 0 is a PHI player; PHI won
-    row = normalize_league_game_log(response).stats[0]
-    assert row.won is True
+    batch = normalize_league_game_log(response)
+    assert batch.stats[0].won is True
+    assert batch.cleanups == {"win_loss_filled_in": 1}
 
 
 def test_missing_win_loss_for_a_whole_team_comes_from_opponent(response: dict) -> None:
     set_wl_for_team(response, "0022600001", BOS, None)
-    stats = normalize_league_game_log(response).stats
-    assert all(s.won is False for s in stats if s.team_id == BOS)  # DET won
+    batch = normalize_league_game_log(response)
+    bos_rows = [s for s in batch.stats if s.team_id == BOS]
+    assert all(s.won is False for s in bos_rows)  # DET won
+    assert batch.cleanups == {"win_loss_filled_in": len(bos_rows)}
 
 
 def test_no_win_loss_for_either_team_is_an_error(response: dict) -> None:
@@ -224,8 +231,10 @@ def test_both_teams_home_is_an_error(response: dict) -> None:
 def test_a_mislabelled_row_is_outvoted_by_teammates(response: dict) -> None:
     # Real example: 1967-68 SFW at SDR, where 10 rows say '@' and 2 say 'vs.'.
     set_column(response, "MATCHUP", "PHI vs. NYK", row_index=0)  # row 0 is PHI, really away
-    game = next(g for g in normalize_league_game_log(response).games if g.game_id == "0022600002")
+    batch = normalize_league_game_log(response)
+    game = next(g for g in batch.games if g.game_id == "0022600002")
     assert (game.home_team_id, game.away_team_id) == (NYK, PHI)
+    assert batch.cleanups == {"home_away_outvoted": 1}
 
 
 def test_a_tied_home_away_vote_is_an_error(response: dict) -> None:
@@ -261,16 +270,25 @@ def set_minutes_for_game(response: dict, game_id: str, minutes) -> None:
 def test_game_where_everyone_has_zero_minutes_means_not_recorded(response: dict) -> None:
     # Early seasons (e.g. 1946-47) report MIN = 0 for every player.
     set_minutes_for_game(response, "0022600001", 0)
-    stats = normalize_league_game_log(response).stats
+    batch = normalize_league_game_log(response)
+    game_rows = [s for s in batch.stats if s.game_id == "0022600001"]
 
-    assert all(s.minutes is None for s in stats if s.game_id == "0022600001")
-    assert all(s.minutes is not None for s in stats if s.game_id == "0022600002")
+    assert all(s.minutes is None for s in game_rows)
+    assert all(s.minutes is not None for s in batch.stats if s.game_id == "0022600002")
+    assert batch.cleanups == {"zero_minutes_not_recorded": len(game_rows)}
+
+
+def test_minutes_missing_from_the_source_are_not_counted_as_a_cleanup(response: dict) -> None:
+    set_minutes_for_game(response, "0022600001", None)
+    assert normalize_league_game_log(response).cleanups == {}
 
 
 def test_single_zero_minute_player_is_a_real_zero(response: dict) -> None:
     # Modern data: under 30 seconds on court rounds down to 0. That is real.
     set_column(response, "MIN", 0, row_index=0)
-    assert normalize_league_game_log(response).stats[0].minutes == 0
+    batch = normalize_league_game_log(response)
+    assert batch.stats[0].minutes == 0
+    assert batch.cleanups == {}
 
 
 @pytest.mark.parametrize(
@@ -287,9 +305,11 @@ def test_fewer_attempts_than_makes_means_attempts_not_recorded(
         set_column(response, "FGM", 1)
         set_column(response, "FGA", 1)
 
-    row = normalize_league_game_log(response).stats[0]
+    batch = normalize_league_game_log(response)
+    row = batch.stats[0]
     assert getattr(row, field) is None
     assert getattr(row, made.lower()) == 1  # makes are kept
+    assert batch.cleanups == {"attempts_not_recorded": 1}
 
 
 def test_consistent_attempts_are_kept(response: dict) -> None:
@@ -395,9 +415,10 @@ def test_duplicate_in_a_real_response_is_resolved(response: dict) -> None:
         ghost[headers.index(column)] = 0
     rows.append(ghost)
 
-    stats = normalize_league_game_log(response).stats
+    batch = normalize_league_game_log(response)
     player = bos_row[headers.index("PLAYER_ID")]
-    assert [s.team_id for s in stats if s.player_id == player] == [BOS]
+    assert [s.team_id for s in batch.stats if s.player_id == player] == [BOS]
+    assert batch.cleanups == {"ghost_rows_dropped": 1}
 
 
 @pytest.mark.parametrize("result", ["W", "L"])

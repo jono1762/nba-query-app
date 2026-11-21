@@ -69,6 +69,20 @@ def test_fetches_every_season_and_type_and_loads_rows(migrated: psycopg.Connecti
     assert len(logs) == 4 and "2026-27 Regular Season" in logs[2]
 
 
+def test_cleanup_counts_are_reported(migrated: psycopg.Connection) -> None:
+    def fetch_with_missing_win_loss(season, season_type):
+        response = json.loads(FIXTURE.read_text())
+        headers = response["resultSets"][0]["headers"]
+        response["resultSets"][0]["rowSet"][0][headers.index("WL")] = None
+        return response
+
+    logs = []
+    results = run(migrated, ["2026-27"], ["Regular Season"], fetch_with_missing_win_loss, logs=logs)
+
+    assert results[0].cleanups == {"win_loss_filled_in": 1}
+    assert "win_loss_filled_in=1" in logs[0]
+
+
 def test_running_again_changes_nothing(migrated: psycopg.Connection) -> None:
     run(migrated, ["2026-27"], ["Regular Season"], FakeFetch())
     results = run(migrated, ["2026-27"], ["Regular Season"], FakeFetch())

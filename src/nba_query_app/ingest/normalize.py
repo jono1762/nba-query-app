@@ -11,12 +11,15 @@ seasons report 0 for every player, so a game where everyone has 0 minutes is
 treated as "minutes not recorded". Likewise, an attempts figure lower than the
 makes (impossible, but present in old box scores) is treated as not recorded,
 a W/L missing from a single player row is filled in from the teammates, and
-ghost copies of a player listed on both teams in one game are removed.
+ghost copies of a player listed on both teams in one game are removed. Each
+time one of these cleanup rules fires it is counted (`Batch.cleanups`), so the
+totals can be reported.
 
 This module does no network or database work, so it is easy to test.
 """
 
-from dataclasses import dataclass
+from collections import Counter
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
@@ -89,12 +92,25 @@ class PlayerGameStats:
     plus_minus: int | None
 
 
+# Names of the cleanup rules counted in Batch.cleanups, with what each count means.
+CLEANUP_RULES = {
+    "ghost_rows_dropped": "ghost copies of a player listed on both teams, dropped",
+    "home_away_outvoted": "rows whose home/away label was outvoted by teammates",
+    "zero_minutes_not_recorded": "rows with 0 minutes in a game where everyone had 0 (now NULL)",
+    "attempts_not_recorded": "attempt values lower than the makes (now NULL)",
+    "win_loss_filled_in": "rows missing W/L, filled in from teammates or the opponent",
+}
+
+
 @dataclass(frozen=True)
 class Batch:
     teams: list[Team]
     players: list[Player]
     games: list[Game]
     stats: list[PlayerGameStats]
+    # How many times each cleanup rule fired (keys from CLEANUP_RULES; rules that
+    # never fired are left out).
+    cleanups: Counter[str] = field(default_factory=Counter)
 
 
 # Our column name -> stats.nba.com column name.
@@ -152,9 +168,12 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
     result = response["resultSets"][0]
     headers: list[str] = result["headers"]
     raw_rows = [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
+    cleanups: Counter[str] = Counter()
+    rows_before = len(raw_rows)
     raw_rows = _resolve_duplicate_player_rows(raw_rows)
+    cleanups["ghost_rows_dropped"] += rows_before - len(raw_rows)
 
-    home_away = _home_and_away_by_game(raw_rows)
+    home_away, cleanups["home_away_outvoted"] = _home_and_away_by_game(raw_rows)
     minutes_missing = _games_without_minutes(raw_rows)
     team_won = _results_by_game_and_team(raw_rows, home_away)
 
@@ -193,12 +212,14 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
 
         counting = {column: row[source] for column, source in OPTIONAL_STATS.items()}
         if game_id in minutes_missing:
+            cleanups["zero_minutes_not_recorded"] += counting["minutes"] == 0
             counting["minutes"] = None
         for column, source in REQUIRED_STATS.items():
             if row[source] is None:
                 raise NormalizeError(f"Missing {source} for player {row['PLAYER_ID']} in {game_id}")
             counting[column] = row[source]
-        _drop_impossible_attempts(counting)
+        cleanups["attempts_not_recorded"] += _drop_impossible_attempts(counting)
+        cleanups["win_loss_filled_in"] += row["WL"] is None
 
         stats.append(
             PlayerGameStats(
@@ -222,17 +243,19 @@ def normalize_league_game_log(response: dict[str, Any]) -> Batch:
         players=list(players.values()),
         games=list(games.values()),
         stats=stats,
+        cleanups=+cleanups,  # unary plus drops the rules that never fired
     )
 
 
 def _home_and_away_by_game(
     raw_rows: list[dict[str, Any]],
-) -> dict[str, tuple[int | None, int | None, dict[int, int]]]:
-    """For each game: (home team, away team, {team: its opponent}).
+) -> tuple[dict[str, tuple[int | None, int | None, dict[int, int]]], int]:
+    """For each game: (home team, away team, {team: its opponent}); plus the outvoted rows.
 
     Home and away are None for neutral-site games, where both teams are listed as away.
     Each team's home/away is the majority of its players' rows: old box scores
-    occasionally mislabel a couple of rows (e.g. 10 say '@', 2 say 'vs.').
+    occasionally mislabel a couple of rows (e.g. 10 say '@', 2 say 'vs.'). The
+    second value counts the rows that were outvoted.
     """
     votes: dict[str, dict[int, list[int]]] = {}  # game -> team -> [home votes, away votes]
     for row in raw_rows:
@@ -240,11 +263,13 @@ def _home_and_away_by_game(
         tally[0 if parse_is_home(row["MATCHUP"]) else 1] += 1
 
     is_home_by_game: dict[str, dict[int, bool]] = {}
+    outvoted = 0
     for game_id, teams in votes.items():
         for team_id, (home_votes, away_votes) in teams.items():
             if home_votes == away_votes:
                 raise NormalizeError(f"Rows for game {game_id} disagree about home/away")
             is_home_by_game.setdefault(game_id, {})[team_id] = home_votes > away_votes
+            outvoted += min(home_votes, away_votes)
 
     result = {}
     for game_id, flags in is_home_by_game.items():
@@ -259,7 +284,7 @@ def _home_and_away_by_game(
             result[game_id] = (None, None, opponent_of)  # neutral site
         else:
             raise NormalizeError(f"Both teams are listed as home in game {game_id}")
-    return result
+    return result, outvoted
 
 
 def _real_stats(row: dict[str, Any]) -> tuple:
@@ -385,12 +410,14 @@ def _results_by_game_and_team(
     return team_won
 
 
-def _drop_impossible_attempts(counting: dict[str, int | None]) -> None:
+def _drop_impossible_attempts(counting: dict[str, int | None]) -> int:
     """Old box scores sometimes show fewer attempts than makes (e.g. 1 FT made, 0 attempted).
 
     The attempts figure is the unreliable one (often a 0 meaning "not recorded"),
     so it becomes None. The makes are kept because points depend on them.
+    Returns how many attempt values were dropped.
     """
+    dropped = 0
     for made, attempted in PAIRS_MADE_ATTEMPTED:
         if (
             counting[made] is not None
@@ -398,6 +425,8 @@ def _drop_impossible_attempts(counting: dict[str, int | None]) -> None:
             and counting[attempted] < counting[made]
         ):
             counting[attempted] = None
+            dropped += 1
+    return dropped
 
 
 def _games_without_minutes(raw_rows: list[dict[str, Any]]) -> set[str]:
