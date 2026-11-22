@@ -75,5 +75,6 @@ src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data
 migrations/          database schema changes (numbered SQL files)
 tests/               automated tests
 docs/PLAN.md         the build plan, decisions and progress
+docs/SCHEMA.md       every table, view and column in plain language
 spikes/              throwaway experiments and their findings (see spikes/FINDINGS.md)
 ```
