@@ -46,6 +46,9 @@ def test_clean_data_passes_every_check(nba_data: NbaData) -> None:
     # 1960-61: before 82-game schedules, so two games per team is not "short".
     add_clean_game(nba_data, "g1", "1960-61")
     add_clean_game(nba_data, "g2", "1960-61", home=2, away=1)
+    nba_data.conn.execute(  # every player has a details row, as after a real load
+        "INSERT INTO nba.player_details (player_id) SELECT player_id FROM nba.players"
+    )
 
     results = run_checks(nba_data.conn, CURRENT, exceptions=[])
 
@@ -348,4 +351,52 @@ def test_known_champions(nba_data: NbaData) -> None:
     # Seasons with no playoff games loaded are skipped.
     assert violations(nba_data, "known_champions") == [
         ("2015-16", "expected the Cleveland Cavaliers, data has T1610612744")
+    ]
+
+
+def add_details(nba_data: NbaData, player_id: int, **values: object) -> None:
+    columns = ["player_id", *values]
+    nba_data.conn.execute(
+        f"INSERT INTO nba.player_details ({', '.join(columns)}) "
+        f"VALUES ({', '.join(['%s'] * len(columns))})",
+        [player_id, *values.values()],
+    )
+
+
+def test_players_without_details(nba_data: NbaData) -> None:
+    nba_data.player(7)
+    nba_data.player(8)
+    nba_data.player(9)
+    add_details(nba_data, 8, birth_date_checked=True)  # looked up, nothing found
+    add_details(nba_data, 9, birth_date="1990-01-01", birth_date_checked=True)
+
+    assert violations(nba_data, "players_without_details") == [
+        ("7", "Player 7: no details row"),
+        ("8", "Player 8: no birth date at NBA.com"),
+    ]
+
+
+def test_implausible_age(nba_data: NbaData) -> None:
+    nba_data.game("g1", "2000-01", game_date="2000-12-01")
+    nba_data.stats("g1", 7, 1, won=True)  # 17 at his only game
+    nba_data.stats("g1", 8, 1, won=True)  # 46
+    nba_data.stats("g1", 9, 1, won=True)  # 25: fine
+    add_details(nba_data, 7, birth_date="1983-12-02")
+    add_details(nba_data, 8, birth_date="1954-11-30")
+    add_details(nba_data, 9, birth_date="1975-06-01")
+
+    assert keys(nba_data, "implausible_age") == ["7", "8"]
+
+
+def test_drafted_after_first_game(nba_data: NbaData) -> None:
+    nba_data.game("g1", "2000-01")
+    nba_data.stats("g1", 7, 1, won=True)
+    nba_data.stats("g1", 8, 1, won=True)
+    nba_data.stats("g1", 9, 1, won=True)
+    add_details(nba_data, 7, draft_year=2002)
+    add_details(nba_data, 8, draft_year=2000)  # drafted in June 2000, played in 2000-01
+    add_details(nba_data, 9, draft_year=2001)  # played a season, then drafted: real in early years
+
+    assert violations(nba_data, "drafted_after_first_game") == [
+        ("7", "Player 7: drafted 2002, first game in 2000-01")
     ]

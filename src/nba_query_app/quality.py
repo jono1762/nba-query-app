@@ -426,6 +426,60 @@ CHECKS = [
         _known_champions_query(),
     ),
     Check(
+        "players_without_details",
+        "players with no row in player_details, or whose birth date was looked up but not found",
+        """
+        SELECT p.player_id::text,
+               p.full_name || CASE WHEN d.player_id IS NULL THEN ': no details row'
+                                   ELSE ': no birth date at NBA.com' END
+        FROM nba.players p LEFT JOIN nba.player_details d USING (player_id)
+        WHERE d.player_id IS NULL OR (d.birth_date_checked AND d.birth_date IS NULL)
+        ORDER BY p.player_id
+        """,
+    ),
+    Check(
+        "implausible_age",
+        "players younger than 18 or 46 and older in their first or last game (the "
+        "oldest NBA player, Nat Hickey, was 45 in 1948)",
+        """
+        WITH span AS (
+            SELECT s.player_id, min(g.game_date) AS first_game, max(g.game_date) AS last_game
+            FROM nba.player_game_stats s JOIN nba.games g USING (game_id)
+            GROUP BY s.player_id
+        )
+        SELECT p.player_id::text,
+               p.full_name || ': born ' || d.birth_date || ', aged '
+                   || date_part('year', age(sp.first_game, d.birth_date)) || ' to '
+                   || date_part('year', age(sp.last_game, d.birth_date))
+        FROM span sp
+        JOIN nba.player_details d USING (player_id)
+        JOIN nba.players p USING (player_id)
+        WHERE age(sp.first_game, d.birth_date) < interval '18 years'
+           OR age(sp.last_game, d.birth_date) >= interval '46 years'
+        ORDER BY p.player_id
+        """,
+    ),
+    Check(
+        "drafted_after_first_game",
+        "players drafted more than a year after their first season (the draft follows "
+        "the season, and a few early players, and Spencer Haywood in 1970-71, played a "
+        "season before being drafted)",
+        """
+        WITH debut AS (
+            SELECT s.player_id, min(g.season) AS season
+            FROM nba.player_game_stats s JOIN nba.games g USING (game_id)
+            GROUP BY s.player_id
+        )
+        SELECT p.player_id::text,
+               p.full_name || ': drafted ' || d.draft_year || ', first game in ' || db.season
+        FROM debut db
+        JOIN nba.player_details d USING (player_id)
+        JOIN nba.players p USING (player_id)
+        WHERE d.draft_year > left(db.season, 4)::integer + 1
+        ORDER BY p.player_id
+        """,
+    ),
+    Check(
         "cup_final_teams",
         "an NBA Cup final team that didn't win an NBA Cup semifinal that season",
         """
@@ -561,6 +615,24 @@ KNOWN_EXCEPTIONS = [
         "short_schedule",
         r"2019-20|2020-21",
         "COVID-19-shortened seasons (2020-21 was scheduled at 72 games)",
+    ),
+    KnownException(
+        "players_without_details",
+        r"79635|200603",
+        "Bobby Watson (1952-53) isn't in NBA.com's player index at all, and Corey Williams "
+        "(1992-94) has no birth date there",
+    ),
+    KnownException(
+        "players_without_details",
+        r"76548|76689|76769|76813|77234|77287|77499|77507|77557|77767|77807|77925|77979|78448",
+        "14 players from 1946-47 to 1954-55 whose NBA.com birth date is a placeholder "
+        "(early April 1905), stored as not recorded",
+    ),
+    KnownException(
+        "drafted_after_first_game",
+        r"78234",
+        "Jim Springer (born 1926, played 1948-49) is listed as a 1956 draft pick, almost "
+        "certainly someone else's pick; the source value is kept",
     ),
 ]
 
