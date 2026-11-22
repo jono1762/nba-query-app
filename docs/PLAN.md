@@ -7,7 +7,7 @@ language on purpose.
 A website where someone types a question like *"Who scored the most points in March 2025?"*. Behind the scenes:
 1. An AI model (Google's Gemini) turns the question into a database query (SQL).
 2. Our code checks that the query is safe, then runs it against a database of NBA stats.
-3. The website shows the answer, taken from the actual data and not from the AI's memory.
+3. The AI turns the result rows into a plain-English answer, and the website shows it with the table underneath. The answer comes from the actual data, not from the AI's memory.
 
 Decisions:
 - **Data:** every player's stats for every **official, competitive game**, plus season totals, for the **full history from 1946-47** to today. That means regular season, NBA Cup final (from 2023-24), play-in (from 2019-20) and playoffs. Exhibitions (All-Star, Rising Stars, preseason) are excluded by design. Source: stats.nba.com only. Stats that weren't recorded in early seasons are stored as "not recorded" (NULL), and the AI must refuse or caveat questions about them.
@@ -30,7 +30,7 @@ Decisions:
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
 | 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
 | 9 | Playoff rounds and series (who won each round, champions) | Done, see `spikes/FINDINGS.md` |
-| 10 | Player details (position, height, birth date, draft) | Next |
+| 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | Next |
 | 11 | SQL safety checker | |
 | 12 | Connect Gemini (command-line first) | |
 | 13 | Retries, refusals, cost logging | |
@@ -80,7 +80,8 @@ CloudFront ──► S3 (the webpage files)
    └─ /api/ask ──► API Gateway (caps request rate) ──► Lambda (our Python backend)
                                                          ├─► reads secrets from SSM
                                                          ├─► asks Gemini to write SQL
-                                                         └─► runs SQL on Neon Postgres
+                                                         ├─► runs SQL on Neon Postgres
+                                                         └─► asks Gemini to phrase the answer from the rows
 
 On your laptop:
   one time:   history download ──► stats.nba.com (1946-47 to today) ──► database
@@ -93,7 +94,7 @@ On your laptop:
 
 ## What happens when someone asks a question
 1. **Rate limit check.** Each visitor gets a fixed number of questions per hour (e.g. 10). There's also an overall daily cap so we never use up the free Gemini allowance.
-2. **Cache check.** If the same question was already asked since the last data update, we return the saved answer and skip the AI call.
+2. **Cache check.** If the same question was already asked since the last data update, we return the saved answer and skip the AI calls.
 3. **Build the AI instructions.** These include:
    - the table layout, with column descriptions
    - basketball terms ("triple-double")
@@ -107,8 +108,11 @@ On your laptop:
    - At most 100 rows are returned.
 6. **Run it** as the read-only database user, with a 5-second time limit. Even if the safety check missed something, the database itself refuses any writes.
 7. **If the query errors,** send the error back to Gemini to fix, at most 2 times, then give up cleanly.
-8. **Show** the results table, the SQL (behind a "Show SQL" toggle), and optionally a one-sentence summary. The summary is off by default because it needs a second AI call.
-9. **Log** each request: question, SQL, success or failure, retries, AI tokens used, estimated cost, and time taken.
+8. **Phrase the answer.** A second Gemini call gets the question and the result rows (not the database) and writes a short plain-English answer, using only those rows. If the rows don't answer the question, it says so instead of filling the gap from its own memory.
+9. **Show** the plain-English answer, the results table, and the SQL (behind a "Show SQL" toggle).
+10. **Log** each request: question, SQL, success or failure, retries, AI calls and tokens used, estimated cost, and time taken.
+
+That is the base case: write SQL, run it, phrase the answer, so at least two AI calls per question. A variant tested in step 14 lets the AI explore the database before answering (see step 12).
 
 ---
 
@@ -151,24 +155,30 @@ On your laptop:
 **9. Playoff rounds and series.** Done. Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down".
 - Decided: **infer them from who played whom**, counting back from the Finals. Game IDs (and the `CommonPlayoffSeries` endpoint, which is the same data) encode the round reliably only from 2001-02; older IDs are sequential or inconsistent (e.g. the 1975 Finals split across two series IDs). Game IDs and known champions serve as cross-checks.
 
-**10. Player details.** Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center". First test which stats.nba.com endpoint has them: one request for every player, or one per player (about 5,000) for birth dates.
+**10. Player details, then `docs/SCHEMA.md`.** Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center". First test which stats.nba.com endpoint has them: one request for every player, or one per player (about 5,000) for birth dates.
 - Out of scope, and the AI should refuse: awards, coaches, arenas, attendance, salaries, injuries, trades, play-by-play. Conferences and standings are possible later (about one request per season).
+- Once the tables are final, write **`docs/SCHEMA.md`**: every table and view, what one row means, how they join, the columns in plain language, which stats are missing in early seasons, and the known data gaps. It's the human-readable version of what the AI will be told about the database. A test checks that it mentions every table, view and column, so it can't silently go stale.
 
 **11. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
 
 **12. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+- **Base case:** the AI writes the SQL, our code safety-checks and runs it, and a second AI call phrases the answer from the result rows (see "What happens when someone asks a question").
+- Build it behind a small interface (question in, answer, rows, SQL and usage out), so a different strategy can replace it without touching the rest.
+- **Variant to compare:** a bounded "agent" loop. The AI gets tools it can call several times before answering: `run_sql` (same safety check, read-only user and row limit) and `find_player` (look up a name, e.g. which of the two Eddie Johnsons is meant). It's capped at about 4 tool calls and about 20 seconds in total, because API Gateway cuts requests off at 29 seconds. It can handle multi-step questions and check its own results, but costs more AI calls per question.
 
 **13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
 
 **14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
 - They run against a frozen copy of a few seasons, so the correct answers never change. The output is a score like "27/30".
+- Each answer is checked twice: are the result rows right, and does the plain-English answer say only what the rows show?
+- Run both strategies from step 12 (base case and agent loop) on the same questions, and compare score, AI calls per question and time taken. Keep the loop only if it's clearly more accurate for the extra calls; record the comparison in the README either way.
 - It runs only when triggered by hand, to save the free AI allowance.
 
 **15. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
 - Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
-**16. Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
+**16. Webpage.** A question box, example questions, the plain-English answer with the results table under it, a "Show SQL" button, and friendly messages for refusals and limits.
 
 **17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
 
@@ -187,7 +197,7 @@ On your laptop:
 - **One database for everything.** Rate limits, cache and logs go in the same Postgres as the stats: simpler. Downside: even a cached answer wakes Neon, which takes under a second.
 - **Upload the code as a zip, not a Docker image.** Simpler on AWS. Docker is still used locally and in testing.
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
-- **The one-sentence AI summary is off by default.** It would double AI usage per question.
+- **Answers are phrased by a second AI call.** Plain-English answers are much friendlier than a bare table, but every question takes at least two AI calls, which uses the free allowance twice as fast. The cache and the rate limits keep that in check. The phrasing call sees only the result rows, so it can't add facts from the AI's memory.
 - **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 19.
 - **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 13, 14) and storage: 286 MB with team box scores, about 56% of Neon's free 0.5 GB. Check the real limit in step 17.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
