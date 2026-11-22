@@ -318,3 +318,34 @@ def test_team_minutes_not_a_game_length(nba_data: NbaData) -> None:
         ("g2 1", "2000-01 T1: 240 minutes, opponent 168"),
         ("g2 2", "2000-01 T2: 168 minutes, opponent 240"),
     ]
+
+
+def test_playoff_games_without_round(nba_data: NbaData) -> None:
+    nba_data.game("p1", "1953-54", "Playoffs")
+    nba_data.game("p2", "1954-55", "Playoffs", playoff_round=(1, "Division Semifinals", 1))
+
+    assert violations(nba_data, "playoff_games_without_round") == [("p1", "1953-54")]
+
+
+def test_playoff_round_differs_from_game_id(nba_data: NbaData) -> None:
+    semis = (2, "Conference Semifinals", 1)
+    nba_data.game("0041500401", "2015-16", "Playoffs", playoff_round=(4, "Finals", 1))
+    nba_data.game("0041500301", "2015-16", "Playoffs", playoff_round=semis)
+    nba_data.game("0040000301", "2000-01", "Playoffs", playoff_round=semis)
+
+    # 2000-01 is before every playoff game ID carried the round, so it's not compared.
+    assert keys(nba_data, "playoff_round_differs_from_game_id") == ["0041500301"]
+
+
+def test_known_champions(nba_data: NbaData) -> None:
+    cle, gsw = 1610612739, 1610612744
+    nba_data.team(cle, "CLE")
+    nba_data.team(gsw, "GSW")
+    nba_data.game("f1", "2015-16", "Playoffs", home=gsw, away=cle, playoff_round=(4, "Finals", 1))
+    nba_data.team_stats("f1", gsw, pts=104, opponent_pts=89)  # GSW "won" the only Finals game
+    nba_data.team_stats("f1", cle, pts=89, opponent_pts=104)
+
+    # Seasons with no playoff games loaded are skipped.
+    assert violations(nba_data, "known_champions") == [
+        ("2015-16", "expected the Cleveland Cavaliers, data has T1610612744")
+    ]

@@ -64,6 +64,25 @@ KNOWN_TOTALS = [
     (76631, "Mark Eaton", "1984-85", "blk", 456),
 ]
 
+# NBA champions to spot-check the inferred playoff rounds against:
+# (season, champion's team_id, name at the time).
+KNOWN_CHAMPIONS = [
+    ("1946-47", 1610612744, "Philadelphia Warriors"),
+    ("1961-62", 1610612738, "Boston Celtics"),
+    ("1966-67", 1610612755, "Philadelphia 76ers"),
+    ("1970-71", 1610612749, "Milwaukee Bucks"),
+    ("1974-75", 1610612744, "Golden State Warriors"),
+    ("1978-79", 1610612760, "Seattle SuperSonics"),
+    ("1990-91", 1610612741, "Chicago Bulls"),
+    ("1998-99", 1610612759, "San Antonio Spurs"),
+    ("2015-16", 1610612739, "Cleveland Cavaliers"),
+    ("2018-19", 1610612761, "Toronto Raptors"),
+]
+
+# From this season, every playoff game ID carries the round as its 8th digit
+# (e.g. 0041500401: round 4); before, IDs are sequential or inconsistent.
+STRUCTURED_PLAYOFF_IDS_FROM = "2001-02"
+
 
 @dataclass(frozen=True)
 class Check:
@@ -125,6 +144,25 @@ def _known_totals_query() -> str:
         SELECT key, 'data has ' || actual || ', official ' || expected
         FROM ({" UNION ALL ".join(parts)}) x
         WHERE actual <> expected
+        ORDER BY 1
+    """
+
+
+def _known_champions_query() -> str:
+    """Report each KNOWN_CHAMPIONS entry whose Finals winner differs (skipped if not loaded)."""
+    values = ", ".join(
+        f"('{season}', {team_id}, '{name}')" for season, team_id, name in KNOWN_CHAMPIONS
+    )
+    return f"""
+        SELECT k.season, 'expected the ' || k.name || ', data has '
+                   || coalesce(s.winner_abbreviation, 'no Finals')
+        FROM (VALUES {values}) AS k (season, team_id, name)
+        LEFT JOIN nba.playoff_series s
+            ON s.season = k.season AND s.playoff_round_name = 'Finals'
+        WHERE EXISTS (
+            SELECT FROM nba.games g WHERE g.season = k.season AND g.season_type = 'Playoffs'
+        )
+          AND s.winner_team_id IS DISTINCT FROM k.team_id
         ORDER BY 1
     """
 
@@ -361,6 +399,33 @@ CHECKS = [
         _known_totals_query(),
     ),
     Check(
+        "playoff_games_without_round",
+        "playoff games whose round couldn't be worked out (not a knockout bracket)",
+        """
+        SELECT game_id, season FROM nba.games
+        WHERE season_type = 'Playoffs' AND playoff_round IS NULL
+        ORDER BY 1
+        """,
+    ),
+    Check(
+        "playoff_round_differs_from_game_id",
+        f"inferred playoff rounds that differ from the round in the game ID (from "
+        f"{STRUCTURED_PLAYOFF_IDS_FROM}, when every playoff game ID carries it)",
+        f"""
+        SELECT game_id, season || ' ' || playoff_round_name || ': inferred round '
+                   || playoff_round || ', game ID says ' || substr(game_id, 8, 1)
+        FROM nba.games
+        WHERE season_type = 'Playoffs' AND season >= '{STRUCTURED_PLAYOFF_IDS_FROM}'
+          AND playoff_round IS DISTINCT FROM substr(game_id, 8, 1)::integer
+        ORDER BY 1
+        """,
+    ),
+    Check(
+        "known_champions",
+        "well-known NBA champions that the inferred Finals winner doesn't match",
+        _known_champions_query(),
+    ),
+    Check(
         "cup_final_teams",
         "an NBA Cup final team that didn't win an NBA Cup semifinal that season",
         """
@@ -457,6 +522,12 @@ KNOWN_EXCEPTIONS = [
         r"Wilt Chamberlain career pts|Hakeem Olajuwon career blk|Wilt Chamberlain 1960-61 reb",
         "the source's game logs fall slightly short of the official totals (2 points, 5 "
         "blocks, 76 rebounds); not investigated game by game, kept as they are",
+    ),
+    KnownException(
+        "playoff_games_without_round",
+        game_ids_in("1953-54", "1953-54"),
+        "the 1953-54 playoffs began with a round robin (three teams in each division each "
+        "playing the other two), so they aren't a knockout bracket",
     ),
     KnownException(
         "uneven_games_per_team",

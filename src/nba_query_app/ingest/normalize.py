@@ -24,9 +24,11 @@ This module does no network or database work, so it is easy to test.
 """
 
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
+
+from nba_query_app.ingest.playoffs import PlayoffGame, playoff_rounds
 
 # SEASON_ID looks like '22026': the first digit is the season type, the rest the start year.
 SEASON_TYPE_BY_PREFIX = {
@@ -65,6 +67,10 @@ class Game:
     home_team_id: int | None  # None at a neutral site
     away_team_id: int | None
     neutral_site: bool
+    # Playoff games only (see ingest/playoffs.py); None otherwise.
+    playoff_round: int | None = None
+    playoff_round_name: str | None = None
+    playoff_series_game: int | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +140,7 @@ CLEANUP_RULES = {
     "win_loss_filled_in": "rows missing W/L, filled in from teammates or the opponent",
     "win_loss_overruled": "player rows whose W/L disagreed with the team log (corrected)",
     "unplayed_games_dropped": "games in the team log with no result and 0-0 (e.g. cancelled)",
+    "playoff_rounds_not_inferred": "playoff games left without a round (not a knockout bracket)",
 }
 
 
@@ -307,11 +314,45 @@ def normalize_league_game_log(response: dict[str, Any], team_response: dict[str,
     return Batch(
         teams=list(teams.values()),
         players=list(players.values()),
-        games=list(games.values()),
+        games=_with_playoff_rounds(list(games.values()), team_stats, cleanups),
         stats=stats,
         cleanups=+cleanups,  # unary plus drops the rules that never fired
         team_stats=team_stats,
     )
+
+
+def _with_playoff_rounds(
+    games: list[Game], team_stats: list[TeamGameStats], cleanups: Counter[str]
+) -> list[Game]:
+    """Add round and series game number to playoff games (a batch holds one season's
+    whole playoffs). Left as None, and counted, if the games aren't a knockout bracket."""
+    playoff_games = [g for g in games if g.season_type == "Playoffs"]
+    if not playoff_games:
+        return games
+    dates = {g.game_id: g.game_date for g in playoff_games}
+    rows = [
+        PlayoffGame(t.game_id, dates[t.game_id], t.team_id, t.won)
+        for t in team_stats
+        if t.game_id in dates
+    ]
+    seasons = {g.season for g in playoff_games}
+    if len(seasons) != 1:
+        raise NormalizeError(f"Playoff games from more than one season: {sorted(seasons)}")
+    rounds = playoff_rounds(seasons.pop(), rows)
+    if rounds is None:
+        cleanups["playoff_rounds_not_inferred"] += len(playoff_games)
+        return games
+    return [
+        replace(
+            g,
+            playoff_round=rounds[g.game_id].round,
+            playoff_round_name=rounds[g.game_id].round_name,
+            playoff_series_game=rounds[g.game_id].series_game,
+        )
+        if g.game_id in rounds
+        else g
+        for g in games
+    ]
 
 
 # Team columns that may be missing (not recorded); points are always present.

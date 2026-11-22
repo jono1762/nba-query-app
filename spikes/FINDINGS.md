@@ -283,3 +283,25 @@ type.
   early seasons. Five values are impossible: 239, 247, 249 and 239 in 1960-62, and
   Denver's 168 on 2026-11-14, whose player rows add up to 242. They're stored as
   the source has them and listed by a quality check.
+
+## Playoff rounds (2026-11-22)
+- **The source's round labels:** the `CommonPlayoffSeries` endpoint's series ID is
+  just the first 9 characters of the game ID (e.g. `0041500401`: 2015-16 playoffs,
+  round 4, series 0, game 1), so it adds nothing beyond the game ID. From 2001-02
+  every playoff game ID carries the round, and it matches the inferred round in
+  every game. Before that, IDs are sequential (round digit 0) or inconsistent. For
+  example, the 1975 Finals (Golden State's 4-0 sweep) is split across two series
+  IDs, one with round "9", and the 1953-54 Finals has a game under round "0".
+- **Decision (2026-11-22): infer rounds from who played whom** (`ingest/playoffs.py`),
+  counting back from the Finals. That handles byes (1946-48, 1974-76: top teams
+  skipped the first round) and the uneven 1949-50 bracket, where counting forward
+  gets the round wrong.
+- **Result:** every season from 1946-47 resolves to a knockout bracket with a single
+  Finals, except **1953-54**, whose playoffs began with a round robin (three teams
+  in each division each playing the other two). Its 23 games are left without a
+  round. Every inferred champion matches the real list; 10 are spot-checked
+  automatically (`KNOWN_CHAMPIONS`).
+- **Playoffs in progress** count forward with the current 4-round format. Replaying
+  the 1983-84, 2024-25 and 2025-26 playoffs day by day gives every game the same
+  round on each day as in the final result.
+
