@@ -156,3 +156,28 @@ def test_refresh_looks_up_each_birth_date_once(players: psycopg.Connection, inde
     second = refresh()
     assert asked == []  # nobody is looked up twice, so a rerun resumes where it stopped
     assert second.birth_dates_checked == 0
+
+
+def test_each_birth_date_is_committed_as_it_arrives(
+    players: psycopg.Connection, index: dict, test_db_url: str
+) -> None:
+    # A normal connection (not autocommit, unlike the test fixtures), as the CLI uses.
+    def fetch_info(player_id: int) -> dict | None:
+        if player_id == 79635:  # the second player looked up
+            raise RuntimeError("network down")
+        return info("1936-08-21T00:00:00")
+
+    # The connection is left by the error, as in a real crash: uncommitted work is lost.
+    with pytest.raises(RuntimeError), psycopg.connect(test_db_url) as conn:
+        refresh_player_details(
+            conn,
+            fetch_index=lambda: index,
+            fetch_info=fetch_info,
+            sleep=lambda s: None,
+            log=lambda line: None,
+        )
+
+    # Seen from another connection: the first lookup was saved before the failure,
+    # so a rerun resumes from the second.
+    assert details_row(players, WILT)[2:] == (date(1936, 8, 21), True)
+    assert details_row(players, 79635)[3] is False

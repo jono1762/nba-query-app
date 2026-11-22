@@ -138,9 +138,14 @@ def load_player_details(conn: psycopg.Connection, details: dict[int, PlayerDetai
 
 
 def players_needing_birth_dates(conn: psycopg.Connection) -> list[int]:
-    rows = conn.execute(
-        "SELECT player_id FROM nba.player_details WHERE NOT birth_date_checked ORDER BY player_id"
-    ).fetchall()
+    # In its own transaction: a bare read on a connection that isn't in autocommit
+    # mode would leave a transaction open, turning every later save into a savepoint
+    # inside it, so nothing would be committed until the very end.
+    with conn.transaction():
+        rows = conn.execute(
+            "SELECT player_id FROM nba.player_details WHERE NOT birth_date_checked "
+            "ORDER BY player_id"
+        ).fetchall()
     return [player_id for (player_id,) in rows]
 
 
