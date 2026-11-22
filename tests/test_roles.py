@@ -18,6 +18,7 @@ ConnectAs = Callable[[str], psycopg.Connection]
     [
         "teams",
         "players",
+        "player_details",
         "games",
         "player_game_stats",
         "team_game_stats",

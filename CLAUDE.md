@@ -12,6 +12,7 @@ Built so far:
 - stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M player rows, 147K team rows and 286 MB. NBA Cup games are tagged with their round.
 - team box scores (final score and team totals) from the team-level log
 - playoff rounds and series (`games.playoff_round*` columns, `nba.playoff_series` view)
+- player details (`nba.player_details`: position, height, weight, birth date, college, country, draft)
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
 
@@ -37,6 +38,7 @@ uv run --env-file .env pytest                          # all tests
 uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated   # one test
 
 uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
+uv run --env-file .env python -m nba_query_app.ingest.player_details   # player details only (first run ~2 h for birth dates)
 uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
 ```
 
@@ -49,15 +51,16 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 ## Architecture
 
 **Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch the player-level and team-level logs (two requests) → normalize both together → load. Each one commits on its own, so a crash keeps earlier seasons.
-- `ingest/fetch.py` calls stats.nba.com `LeagueGameLog`, which returns a whole season in one request: `level="player"` gives one row per player per game, `level="team"` one row per team per game. It retries with increasing waits and raises `FetchError` after the last attempt.
+- `ingest/fetch.py` calls stats.nba.com `LeagueGameLog`, which returns a whole season in one request: `level="player"` gives one row per player per game, `level="team"` one row per team per game. It also fetches player details: `fetch_player_index` (every player in history, one request) and `fetch_player_info` (one player, with birth date; `None` when the source has no record, which it signals with an empty body). All requests retry with increasing waits and raise `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats` and `TeamGameStats`. It takes the player-level and team-level responses together (`normalize_team_game_log` handles the team one).
 - `ingest/load.py` upserts a `Batch` in one transaction.
+- `ingest/player_details.py` loads `nba.player_details` (position, height, weight, college, country, draft) from the player index in one request, then looks up birth dates one player at a time for players not yet checked (`birth_date_checked`), saving each as it arrives. So the first run takes about 2 hours, later ones only fetch new players, and an interrupted run resumes. Birth dates are kept out of the `PlayerDetails` dataclass and set by a separate UPDATE, like `nba_cup_round`, so reloading the index can't wipe them. NBA.com's placeholder for an unknown birth date (a day in early April 1905) is stored as NULL and counted. The backfill runs it at the end; it also has its own CLI.
 - `ingest/cup.py` (pure) handles the NBA Cup request, which returns *every* Cup game: `final_only` keeps the final's rows for loading, and `cup_rounds` works out each game's round. A team's first 4 Cup games are group games, its 5th the quarterfinal, its 6th the semifinal, its 7th the final. `load.load_cup_rounds` then tags the stored games; it refuses if a Cup game isn't loaded yet, which is why the regular season comes first in `SEASON_TYPES`.
 - `ingest/playoffs.py` (pure) infers each playoff game's round and game number within its series from who played whom, since the source's round labels are unreliable before 2001-02. Completed playoffs count back from the Finals (the one series whose winner plays no later series), which handles old byes and uneven brackets. Playoffs in progress count forward with the current 4-round format. Anything that isn't a knockout bracket (a team in two series at once, a loser playing on) returns None: that's the 1953-54 round robin, left without rounds and counted. `normalize.py` adds the result to the playoff `Game` rows, because one playoffs request holds the whole season's playoffs.
 - Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.
-- The one deliberate exception is `games.nba_cup_round`. It's set by a separate UPDATE and kept out of `Game`, so reloading a regular season can't wipe it. Upserts only touch the columns they list.
+- The deliberate exceptions are `games.nba_cup_round` and `player_details.birth_date` (plus `birth_date_checked`). They're set by separate UPDATEs and kept out of the dataclasses, so reloading a regular season or the player index can't wipe them. Upserts only touch the columns they list.
 
 **Upserts change only what changed.**
 - `DO UPDATE … WHERE (cols) IS DISTINCT FROM (EXCLUDED cols)` skips unchanged rows.
@@ -92,7 +95,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 
 **Stat coverage.** `nba.stat_coverage` (share of player rows with each stat, per season) and `nba.stat_tracked_since` (per stat: first season with any value, and the first season from which every season is at least 98% recorded) are computed from the data, never typed in. They drive the refuse-or-caveat rules for early seasons. The threshold is 98%, not 99%, because 1984-85 sits at about 98.5% for most stats (a few players have partial box scores all season).
 
-**Data-quality checks** (`quality.py`) are SQL queries that each return `(key, detail)` rows, one per violation: impossible values, points or rebounds that don't add up, values above all-time records, player points that don't add up to the team's score in the team log, team minutes that aren't a valid game length or (for player rows) fall well short of the game length (usually a player row missing from the source), uneven games per team, playoff games without an inferred round or whose round differs from the game ID (from 2001-02), and spot-checks against well-known official totals and champions (`KNOWN_TOTALS`, e.g. Kareem's 38,387 career points; `KNOWN_CHAMPIONS`). They only report; they never block a load or change data. Violations that were investigated and accepted go in `KNOWN_EXCEPTIONS` (a regex on the key, plus the reason), so new problems stand out. Queries get a `%(current_season)s` parameter, so a literal `%` must be written `%%`. The exit code is 1 if anything unexplained is found.
+**Data-quality checks** (`quality.py`) are SQL queries that each return `(key, detail)` rows, one per violation: impossible values, points or rebounds that don't add up, values above all-time records, player points that don't add up to the team's score in the team log, team minutes that aren't a valid game length or (for player rows) fall well short of the game length (usually a player row missing from the source), uneven games per team, playoff games without an inferred round or whose round differs from the game ID (from 2001-02), players without details or a birth date, implausible ages (under 18 or over 45), draft years more than a year after a player's first season, and spot-checks against well-known official totals and champions (`KNOWN_TOTALS`, e.g. Kareem's 38,387 career points; `KNOWN_CHAMPIONS`). They only report; they never block a load or change data. Violations that were investigated and accepted go in `KNOWN_EXCEPTIONS` (a regex on the key, plus the reason), so new problems stand out. Queries get a `%(current_season)s` parameter, so a literal `%` must be written `%%`. The exit code is 1 if anything unexplained is found.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 

@@ -305,3 +305,36 @@ type.
   the 1983-84, 2024-25 and 2025-26 playoffs day by day gives every game the same
   round on each day as in the final result.
 
+## Player details (2026-11-22)
+- **Two endpoints.** `PlayerIndex` (with `Historical=1`) returns every player in
+  history in one request: position, height, weight, college, country and draft.
+  It has no birth date; that needs `CommonPlayerInfo`, one request per player.
+  The first run looked up 5,159 players in 1 h 54 min (a 1-second pause between
+  requests); later runs only look up new players.
+- **Coverage** (5,159 players): position 5,111, height 5,112, weight 5,105,
+  college 5,155, country 5,158 (82 countries), birth date 5,143, draft year 3,722.
+  141 players have a draft year but no round (early territorial and other special
+  picks, e.g. Wilt Chamberlain in 1959). The 48 players without a position are
+  almost all from before 1960.
+- **Blanks:** the index writes "not listed" as an empty string, a space or `-`;
+  all become NULL.
+- **Missing players:** Bobby Watson (Minneapolis, 1952-53) isn't in the index at
+  all, so he has a details row of NULLs. `CommonPlayerInfo` signals "no such
+  player" with an empty response body.
+- **Placeholder birth dates:** 14 players from 1946-47 to 1954-55 are listed as
+  born on a day between April 2 and April 14, 1905 (e.g. Johnny Ezersky, really
+  born in 1922). The age check caught five of them, who would have been 47-49.
+  **Decision (2026-11-22): store them as NULL** and count them when loading.
+  Corey Williams (1992-94) has no birth date at all. So 16 players lack one.
+- **Positions** are only `G`, `F`, `C` and two-letter combinations (G 2,018,
+  F 1,866, C 693, then G-F, F-C, C-F, F-G). There's no point guard, shooting guard,
+  small forward or power forward, and one label covers a whole career.
+- **Draft year after the first game:** six players played a season and were
+  drafted the following summer (four in 1946-50, Bud Grant in 1949-50, and Spencer
+  Haywood, signed as a hardship case in 1970-71). That's real, so the check only
+  flags a draft more than a year after a player's first season. One remains: Jim
+  Springer (born 1926, played 1948-49) listed as a 1956 pick, almost certainly
+  someone else's pick; the source value is kept.
+- **Ages:** the youngest player in a game was Andrew Bynum (18 years, 6 days, in
+  2005); nobody is under 18 or over 45 once the placeholders are removed.
+

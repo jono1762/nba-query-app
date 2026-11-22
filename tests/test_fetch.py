@@ -3,7 +3,12 @@
 import pytest
 import requests
 
-from nba_query_app.ingest.fetch import FetchError, fetch_league_game_log
+from nba_query_app.ingest.fetch import (
+    FetchError,
+    fetch_league_game_log,
+    fetch_player_index,
+    fetch_player_info,
+)
 
 GOOD = {"resultSets": [{"headers": ["GAME_ID"], "rowSet": [["0022600001"]]}]}
 
@@ -92,3 +97,45 @@ def test_team_level_asks_for_one_row_per_team(endpoint_args: dict) -> None:
 def test_rejects_unknown_level() -> None:
     with pytest.raises(ValueError, match="level"):
         fetch_league_game_log("2026-27", "Playoffs", "coach", request=FakeRequests())
+
+
+def test_empty_game_log_is_retried_like_any_failure() -> None:
+    fake = FakeRequests({}, GOOD)
+    assert fetch_league_game_log("2026-27", "Playoffs", request=fake, sleep=lambda s: None) == GOOD
+
+
+def test_player_index_is_one_request() -> None:
+    calls = []
+
+    def fake(timeout):
+        calls.append(timeout)
+        return GOOD
+
+    assert fetch_player_index(request=fake, sleep=lambda s: None) == GOOD
+    assert len(calls) == 1
+
+
+def test_player_info_for_an_unknown_player_is_none_without_retrying() -> None:
+    # Real example: player 79635 (Bobby Watson, 1954-55); the source sends an empty body.
+    calls = []
+
+    def fake(player_id, timeout):
+        calls.append(player_id)
+        return {}
+
+    assert fetch_player_info(79635, request=fake, sleep=lambda s: None) is None
+    assert calls == [79635]
+
+
+def test_player_info_retries_real_failures() -> None:
+    outcomes = [requests.Timeout(), GOOD]
+
+    def fake(player_id, timeout):
+        outcome = outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    sleeps = []
+    assert fetch_player_info(893, request=fake, sleep=sleeps.append) == GOOD
+    assert sleeps == [5.0]

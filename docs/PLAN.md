@@ -30,8 +30,8 @@ Decisions:
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
 | 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
 | 9 | Playoff rounds and series (who won each round, champions) | Done, see `spikes/FINDINGS.md` |
-| 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | Next |
-| 11 | SQL safety checker | |
+| 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | Done, see `docs/SCHEMA.md` and `spikes/FINDINGS.md` |
+| 11 | SQL safety checker | Next |
 | 12 | Connect Gemini (command-line first) | |
 | 13 | Retries, refusals, cost logging | |
 | 14 | Accuracy test | |
@@ -156,7 +156,8 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 **9. Playoff rounds and series.** Done. Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down".
 - Decided: **infer them from who played whom**, counting back from the Finals. Game IDs (and the `CommonPlayoffSeries` endpoint, which is the same data) encode the round reliably only from 2001-02; older IDs are sequential or inconsistent (e.g. the 1975 Finals split across two series IDs). Game IDs and known champions serve as cross-checks.
 
-**10. Player details, then `docs/SCHEMA.md`.** Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center". First test which stats.nba.com endpoint has them: one request for every player, or one per player (about 5,000) for birth dates.
+**10. Player details, then `docs/SCHEMA.md`.** Done. Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center".
+- Decided: the player index gives everything except birth date in one request; birth dates need one request per player, so they are fetched once (about 2 hours) and after that only for new players.
 - Out of scope, and the AI should refuse: awards, coaches, arenas, attendance, salaries, injuries, trades, play-by-play. Conferences and standings are possible later (about one request per season).
 - Once the tables are final, write **`docs/SCHEMA.md`**: every table and view, what one row means, how they join, the columns in plain language, which stats are missing in early seasons, and the known data gaps. It's the human-readable version of what the AI will be told about the database. A test checks that it mentions every table, view and column, so it can't silently go stale.
 
