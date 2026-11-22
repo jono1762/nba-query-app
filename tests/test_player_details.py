@@ -181,3 +181,19 @@ def test_each_birth_date_is_committed_as_it_arrives(
     # so a rerun resumes from the second.
     assert details_row(players, WILT)[2:] == (date(1936, 8, 21), True)
     assert details_row(players, 79635)[3] is False
+
+
+def test_placeholder_birth_dates_are_not_recorded(players: psycopg.Connection, index: dict) -> None:
+    # NBA.com lists some early players as born in early April 1905 when it doesn't know.
+    births = {WILT: "1905-04-14T00:00:00", CURRY: "1988-03-14T00:00:00"}
+
+    result = refresh_player_details(
+        players,
+        fetch_index=lambda: index,
+        fetch_info=lambda player_id: info(births.get(player_id)),
+        sleep=lambda s: None,
+        log=lambda line: None,
+    )
+
+    assert details_row(players, WILT)[2:] == (None, True)  # looked up; treated as no record
+    assert (result.birth_dates_found, result.placeholder_birth_dates) == (1, 1)

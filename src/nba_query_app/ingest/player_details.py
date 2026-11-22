@@ -97,6 +97,16 @@ def parse_birth_date(response: dict[str, Any] | None) -> date | None:
     return None if birth is None else date.fromisoformat(birth[:10])
 
 
+# NBA.com fills in an unknown birth date for some early players with a day in early
+# April 1905 (14 players, 1946-47 to 1954-55, e.g. Johnny Ezersky, really born in 1922).
+# No real NBA player was born then, so these are treated as not recorded.
+PLACEHOLDER_BIRTH_MONTH = (1905, 4)
+
+
+def is_placeholder_birth_date(birth_date: date) -> bool:
+    return (birth_date.year, birth_date.month) == PLACEHOLDER_BIRTH_MONTH
+
+
 _COLUMNS = [f.name for f in fields(PlayerDetails)]
 _UPDATED = [c for c in _COLUMNS if c != "player_id"]
 UPSERT_DETAILS = sql.SQL(
@@ -166,6 +176,7 @@ class RefreshResult:
     details_changed: int
     birth_dates_checked: int
     birth_dates_found: int
+    placeholder_birth_dates: int  # placeholders treated as not recorded (also not found)
 
 
 def refresh_player_details(
@@ -182,15 +193,21 @@ def refresh_player_details(
     todo = players_needing_birth_dates(conn)
     log(f"Player details: {changed} rows new/changed; {len(todo)} birth date(s) to look up.")
 
-    found = 0
+    found = placeholders = 0
     for index, player_id in enumerate(todo, start=1):
         sleep(pause_seconds)  # be polite to stats.nba.com
         birth_date = parse_birth_date(fetch_info(player_id))
+        if birth_date is not None and is_placeholder_birth_date(birth_date):
+            birth_date = None
+            placeholders += 1
         save_birth_date(conn, player_id, birth_date)
         found += birth_date is not None
         if index % 100 == 0 or index == len(todo):
-            log(f"  birth dates: {index}/{len(todo)} looked up, {found} found")
-    return RefreshResult(changed, len(todo), found)
+            log(
+                f"  birth dates: {index}/{len(todo)} looked up, {found} found, "
+                f"{placeholders} placeholder(s) treated as not recorded"
+            )
+    return RefreshResult(changed, len(todo), found, placeholders)
 
 
 def main() -> None:
@@ -200,7 +217,8 @@ def main() -> None:
     print(
         f"Done in {time.perf_counter() - started:.0f}s: {result.details_changed} detail rows "
         f"new/changed, {result.birth_dates_found} of {result.birth_dates_checked} "
-        "birth dates found."
+        f"birth dates found ({result.placeholder_birth_dates} placeholder(s) treated as "
+        "not recorded)."
     )
 
 
