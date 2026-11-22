@@ -4,7 +4,7 @@ The player-level response has one row per player per game. From it we derive:
 - teams and players (with the most recent name seen in this batch),
 - games (date, season, home and away team),
 - box score rows (with opponent, home/away and win/loss worked out).
-The optional team-level response (one row per team per game) gives each team's
+The matching team-level response (one row per team per game) gives each team's
 final score and totals. It also decides each game's home/away and result: its
 winner always has the higher score, while old player rows occasionally carry the
 wrong labels. The player rows' own labels are the fallback.
@@ -146,7 +146,7 @@ class Batch:
     # How many times each cleanup rule fired (keys from CLEANUP_RULES; rules that
     # never fired are left out).
     cleanups: Counter[str] = field(default_factory=Counter)
-    # From the team-level log, when one was given.
+    # From the team-level log.
     team_stats: list[TeamGameStats] = field(default_factory=list)
 
 
@@ -214,16 +214,12 @@ def _response_rows(response: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(zip(headers, values, strict=True)) for values in result["rowSet"]]
 
 
-def normalize_league_game_log(
-    response: dict[str, Any], team_response: dict[str, Any] | None = None
-) -> Batch:
-    """Convert a LeagueGameLog player-level response (and optionally the matching
-    team-level one, for the same season and season type) into table rows."""
+def normalize_league_game_log(response: dict[str, Any], team_response: dict[str, Any]) -> Batch:
+    """Convert a LeagueGameLog player-level response and the matching team-level one
+    (same season and season type) into table rows."""
     raw_rows = _response_rows(response)
     cleanups: Counter[str] = Counter()
-    team_stats: list[TeamGameStats] = []
-    if team_response is not None:
-        team_stats = normalize_team_game_log(team_response, cleanups)
+    team_stats = normalize_team_game_log(team_response, cleanups)
     rows_before = len(raw_rows)
     raw_rows = _resolve_duplicate_player_rows(raw_rows)
     cleanups["ghost_rows_dropped"] += rows_before - len(raw_rows)
