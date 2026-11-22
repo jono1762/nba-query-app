@@ -24,10 +24,11 @@ uv run --env-file .env pytest        # all tests (database tests need Postgres r
 ## Loading NBA data
 
 Data comes from stats.nba.com, which blocks cloud servers, so run this from a home
-connection. A whole season is one request. Reruns are safe: unchanged rows are skipped.
+connection. A whole season is two requests (player and team logs). Reruns are safe:
+unchanged rows are skipped.
 
 ```bash
-uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~5 min)
+uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~10 min)
 uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27  # just the current season
 uv run --env-file .env python -m nba_query_app.ingest.backfill --help          # all options
 uv run --env-file .env python -m nba_query_app.quality                         # data-quality report
@@ -43,6 +44,8 @@ blocks a load.
 - `nba` schema: `teams`, `players`, `games`, `player_game_stats` (one row per
   player per team per game, from 1946-47), and `meta` (data version and newest game date).
   Stats that weren't recorded in early seasons are NULL ("not recorded"), not 0.
+- `nba.team_game_stats`: one row per team per game (final score and team totals), from
+  the source's team-level log.
 - `nba.player_season_stats` view: season totals per player, calculated from the game
   rows. A total is NULL unless the stat was recorded in every one of the player's games.
 - `nba.stat_coverage` and `nba.stat_tracked_since` views: how completely each stat was

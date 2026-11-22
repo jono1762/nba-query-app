@@ -1,4 +1,4 @@
-"""Download player game logs from stats.nba.com.
+"""Download game logs from stats.nba.com: one row per player per game, or per team per game.
 
 stats.nba.com blocks cloud servers, so this only works from a home connection.
 It is also occasionally slow or flaky, so failed requests are retried with
@@ -25,15 +25,22 @@ API_SEASON_TYPE = {
 }
 
 
+# "player": one row per player per game (box score lines).
+# "team": one row per team per game (final score and team totals).
+LEVELS = {"player": "P", "team": "T"}
+
+
 class FetchError(RuntimeError):
     """stats.nba.com didn't return usable data after all retries."""
 
 
-def _request_league_game_log(season: str, season_type: str, timeout: float) -> dict[str, Any]:
+def _request_league_game_log(
+    season: str, season_type: str, level: str, timeout: float
+) -> dict[str, Any]:
     endpoint = leaguegamelog.LeagueGameLog(
         season=season,
         season_type_all_star=API_SEASON_TYPE[season_type],
-        player_or_team_abbreviation="P",  # one row per player per game
+        player_or_team_abbreviation=LEVELS[level],
         timeout=timeout,
     )
     return endpoint.get_dict()
@@ -42,23 +49,26 @@ def _request_league_game_log(season: str, season_type: str, timeout: float) -> d
 def fetch_league_game_log(
     season: str,
     season_type: str,
+    level: str = "player",
     *,
     attempts: int = 3,
     backoff_seconds: float = 5.0,
     timeout: float = 60.0,
-    request: Callable[[str, str, float], dict[str, Any]] = _request_league_game_log,
+    request: Callable[[str, str, str, float], dict[str, Any]] = _request_league_game_log,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
-    """Return the raw LeagueGameLog response for one season and season type.
+    """Return the raw LeagueGameLog response for one season, season type and level.
 
     `request` and `sleep` can be swapped out in tests so nothing hits the network.
     """
     if season_type not in SEASON_TYPES:
         raise ValueError(f"season_type must be one of {SEASON_TYPES}, got {season_type!r}")
+    if level not in LEVELS:
+        raise ValueError(f"level must be one of {tuple(LEVELS)}, got {level!r}")
 
     for attempt in range(1, attempts + 1):
         try:
-            response = request(season, season_type, timeout)
+            response = request(season, season_type, level, timeout)
             response["resultSets"][0]["rowSet"]  # noqa: B018 - check the shape we rely on
             return response
         # RequestException: network/timeout. ValueError: body wasn't JSON (often a block page).
@@ -66,7 +76,8 @@ def fetch_league_game_log(
         except (requests.RequestException, ValueError, KeyError, IndexError, TypeError) as error:
             if attempt == attempts:
                 raise FetchError(
-                    f"Giving up on {season} {season_type} after {attempts} attempts: {error!r}"
+                    f"Giving up on {season} {season_type} ({level} log) after {attempts} "
+                    f"attempts: {error!r}"
                 ) from error
             sleep(backoff_seconds * attempt)
 

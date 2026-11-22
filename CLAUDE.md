@@ -9,7 +9,8 @@ A portfolio project, focused on the backend. Users ask NBA player-stat questions
 Built so far:
 - project skeleton and CI
 - `nba` schema and database roles
-- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M rows and 305 MB. NBA Cup games are tagged with their round.
+- stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M player rows, 147K team rows and 286 MB. NBA Cup games are tagged with their round.
+- team box scores (final score and team totals) from the team-level log
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
 
@@ -38,7 +39,7 @@ uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] 
 uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
 ```
 
-The backfill makes real requests to stats.nba.com (about 170 for the full history, roughly 5 minutes). Run it only when data is actually needed.
+The backfill makes real requests to stats.nba.com (about 340 for the full history, two per season and season type, roughly 10 minutes). Run it only when data is actually needed.
 
 Without `DATABASE_URL`, database tests are **skipped**. With `REQUIRE_DATABASE=1` (set in CI) they **fail** instead.
 
@@ -46,9 +47,9 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 
 ## Architecture
 
-**Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch → normalize → load. Each one commits on its own, so a crash keeps earlier seasons.
-- `ingest/fetch.py` calls stats.nba.com `LeagueGameLog` (player mode), which returns a whole season in one request. It retries with increasing waits and raises `FetchError` after the last attempt.
-- `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats`.
+**Data flow.** `ingest/backfill.py` runs, for each season and season type: fetch the player-level and team-level logs (two requests) → normalize both together → load. Each one commits on its own, so a crash keeps earlier seasons.
+- `ingest/fetch.py` calls stats.nba.com `LeagueGameLog`, which returns a whole season in one request: `level="player"` gives one row per player per game, `level="team"` one row per team per game. It retries with increasing waits and raises `FetchError` after the last attempt.
+- `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats` and `TeamGameStats`. It takes the player-level and team-level responses together (`normalize_team_game_log` handles the team one).
 - `ingest/load.py` upserts a `Batch` in one transaction.
 - `ingest/cup.py` (pure) handles the NBA Cup request, which returns *every* Cup game: `final_only` keeps the final's rows for loading, and `cup_rounds` works out each game's round. A team's first 4 Cup games are group games, its 5th the quarterfinal, its 6th the semifinal, its 7th the final. `load.load_cup_rounds` then tags the stored games; it refuses if a Cup game isn't loaded yet, which is why the regular season comes first in `SEASON_TYPES`.
 - Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
@@ -67,6 +68,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `SEASON_ID` such as `'22026'`: the first digit is the season type (2 = regular season, 4 = playoffs, 5 = play-in, 6 = NBA Cup final; anything else, including 1 = preseason and 3 = All-Star, is rejected), then the start year. It becomes `'2026-27'`.
   - The API calls play-in `PlayIn` (from 2019-20); we store it as `Play-In`.
   - The NBA Cup final (from 2023-24) is requested as `IST`, which returns every Cup game. Only the prefix-6 final is loaded as box scores, because the group, quarterfinal and semifinal games count as regular-season games we already have. All Cup games get `nba_cup_round` (see `ingest/cup.py`).
+- **The team log decides each game's home/away and W/L.** It has one row per team, and its winner always has the higher score, while a few old player rows carry wrong labels (e.g. 1974-11-19, where the player rows say CLE won with 85 to HOU's 94). Player rows follow it, and overruled labels are counted. The rules below for home/away and W/L are the fallback for games missing from the team log.
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
@@ -82,11 +84,13 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Every time a cleanup rule above fires, it's counted in `Batch.cleanups` (rule names in `normalize.CLEANUP_RULES`). The backfill logs the counts per season and the totals at the end. A new cleanup rule needs a counter too.
 - When data trips a new rule, dry-run fetch + normalize over all seasons (no DB) to find every case at once, then look at the actual rows before writing a rule. Several "obvious" rules here turned out to drop real stats.
 
+**Team box scores** (`nba.team_game_stats`, one row per team per game) come straight from the team-level log, not from adding up player rows, so scores and team totals stay right in games where the source lost a player. A CHECK enforces `won = (pts > opponent_pts)`.
+
 **Season totals** are the view `nba.player_season_stats` (one row per player, season and season type, all teams combined), calculated from the game rows so the two always agree. A total is NULL unless the stat was recorded in every one of the player's games that season, so partial coverage never undercounts. It's a plain view, not a stored copy: a full-history scan takes about 0.5 s locally.
 
 **Stat coverage.** `nba.stat_coverage` (share of player rows with each stat, per season) and `nba.stat_tracked_since` (per stat: first season with any value, and the first season from which every season is at least 98% recorded) are computed from the data, never typed in. They drive the refuse-or-caveat rules for early seasons. The threshold is 98%, not 99%, because 1984-85 sits at about 98.5% for most stats (a few players have partial box scores all season).
 
-**Data-quality checks** (`quality.py`) are SQL queries that each return `(key, detail)` rows, one per violation: impossible values, points or rebounds that don't add up, values above all-time records, winners with fewer points, team minutes well short of the game length (usually a player row missing from the source), uneven games per team, and spot-checks against well-known official totals (`KNOWN_TOTALS`, e.g. Kareem's 38,387 career points). They only report; they never block a load or change data. Violations that were investigated and accepted go in `KNOWN_EXCEPTIONS` (a regex on the key, plus the reason), so new problems stand out. Queries get a `%(current_season)s` parameter, so a literal `%` must be written `%%`. The exit code is 1 if anything unexplained is found.
+**Data-quality checks** (`quality.py`) are SQL queries that each return `(key, detail)` rows, one per violation: impossible values, points or rebounds that don't add up, values above all-time records, player points that don't add up to the team's score in the team log, team minutes that aren't a valid game length or (for player rows) fall well short of the game length (usually a player row missing from the source), uneven games per team, and spot-checks against well-known official totals (`KNOWN_TOTALS`, e.g. Kareem's 38,387 career points). They only report; they never block a load or change data. Violations that were investigated and accepted go in `KNOWN_EXCEPTIONS` (a regex on the key, plus the reason), so new problems stand out. Queries get a `%(current_season)s` parameter, so a literal `%` must be written `%%`. The exit code is 1 if anything unexplained is found.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 
@@ -107,8 +111,8 @@ Consequences of this setup:
 
 ## Constraints to keep in mind
 
-- **stats.nba.com blocks cloud IPs**, so ingestion runs from a home machine. cdn.nba.com returned 403 even from home and was dropped. The daily update will be a local scheduled job that re-fetches the current season (one request), relying on idempotent upserts.
-- **Data goes into the local Docker database for now.** Neon is set up and loaded in step 14 of `docs/PLAN.md`.
+- **stats.nba.com blocks cloud IPs**, so ingestion runs from a home machine. cdn.nba.com returned 403 even from home and was dropped. The daily update will be a local scheduled job that re-fetches the current season (two requests: player and team logs), relying on idempotent upserts.
+- **Data goes into the local Docker database for now.** Neon is set up and loaded in step 17 of `docs/PLAN.md`.
 - **The Gemini free tier has tight per-minute and daily limits.** Tests must never call the real LLM, so use stubs. The accuracy eval runs only when triggered by hand.
 - **The LLM doesn't know today's date.** Always pass the current date, the current season and `nba.meta.latest_game_date` into the prompt.
 - **GitHub Actions:** `astral-sh/setup-uv` no longer publishes moving major tags, so pin an exact version (e.g. `@v10.3.3`). CI runs only on pushes to `main` and on pull requests.

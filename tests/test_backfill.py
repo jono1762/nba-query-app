@@ -11,6 +11,7 @@ from nba_query_app.db.migrate import apply_migrations
 from nba_query_app.ingest.backfill import backfill, parse_args
 
 FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games.json"
+TEAM_FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games_team.json"
 TODAY = date(2026, 11, 20)
 
 
@@ -25,10 +26,10 @@ class FakeFetch:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, season, season_type):
-        self.calls.append((season, season_type))
+    def __call__(self, season, season_type, level):
+        self.calls.append((season, season_type, level))
         if (season, season_type) == ("2026-27", "Regular Season"):
-            return json.loads(FIXTURE.read_text())
+            return json.loads((FIXTURE if level == "player" else TEAM_FIXTURE).read_text())
         return empty_response()
 
 
@@ -58,19 +59,22 @@ def test_fetches_every_season_and_type_and_loads_rows(migrated: psycopg.Connecti
     )
 
     assert fetch.calls == [
-        ("2025-26", "Regular Season"),
-        ("2025-26", "Playoffs"),
-        ("2026-27", "Regular Season"),
-        ("2026-27", "Playoffs"),
+        (season, season_type, level)
+        for season in ("2025-26", "2026-27")
+        for season_type in ("Regular Season", "Playoffs")
+        for level in ("player", "team")
     ]
-    assert sleeps == [1.5, 1.5, 1.5]  # between requests, not before the first
+    assert sleeps == [1.5] * 7  # between requests, not before the first
     assert [r.rows_fetched for r in results] == [0, 0, 41, 0]
     assert migrated.execute("SELECT count(*) FROM nba.player_game_stats").fetchone() == (41,)
+    assert migrated.execute("SELECT count(*) FROM nba.team_game_stats").fetchone() == (4,)
     assert len(logs) == 4 and "2026-27 Regular Season" in logs[2]
 
 
 def test_cleanup_counts_are_reported(migrated: psycopg.Connection) -> None:
-    def fetch_with_missing_win_loss(season, season_type):
+    def fetch_with_missing_win_loss(season, season_type, level):
+        if level == "team":
+            return json.loads(TEAM_FIXTURE.read_text())
         response = json.loads(FIXTURE.read_text())
         headers = response["resultSets"][0]["headers"]
         response["resultSets"][0]["rowSet"][0][headers.index("WL")] = None
@@ -92,10 +96,10 @@ def test_running_again_changes_nothing(migrated: psycopg.Connection) -> None:
 
 
 def test_failure_keeps_seasons_already_saved(migrated: psycopg.Connection) -> None:
-    def fetch(season, season_type):
+    def fetch(season, season_type, level):
         if season == "2027-28":
             raise RuntimeError("network down")
-        return FakeFetch()(season, season_type)
+        return FakeFetch()(season, season_type, level)
 
     with pytest.raises(RuntimeError):
         run(migrated, ["2026-27", "2027-28"], ["Regular Season"], fetch)
@@ -126,7 +130,7 @@ def test_season_types_only_requested_once_they_existed(migrated: psycopg.Connect
     all_types = ["Regular Season", "NBA Cup Final", "Play-In", "Playoffs"]
     run(migrated, ["2018-19", "2019-20", "2023-24"], all_types, fetch)
 
-    assert fetch.calls == [
+    assert [call[:2] for call in fetch.calls if call[2] == "player"] == [
         ("2018-19", "Regular Season"),
         ("2018-19", "Playoffs"),
         ("2019-20", "Regular Season"),  # play-in from 2019-20
@@ -143,9 +147,9 @@ def test_cup_request_tags_regular_season_games_with_their_round(
     migrated: psycopg.Connection,
 ) -> None:
     # The Cup ("IST") response repeats regular-season games; here, the fixture's two games.
-    def fetch(season, season_type):
+    def fetch(season, season_type, level):
         if season_type in ("Regular Season", "NBA Cup Final"):
-            return json.loads(FIXTURE.read_text())
+            return json.loads((FIXTURE if level == "player" else TEAM_FIXTURE).read_text())
         return empty_response()
 
     run(migrated, ["2026-27"], ["Regular Season", "NBA Cup Final"], fetch)

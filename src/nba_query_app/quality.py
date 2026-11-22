@@ -208,26 +208,45 @@ CHECKS = [
         _extreme_value_query(),
     ),
     Check(
-        "result_doesnt_match_points",
-        "a game whose two teams don't have one winner and one loser, "
-        "or whose winner scored fewer points (adding up player rows)",
+        "player_points_dont_match_team_score",
+        "a team's player rows don't add up to its final score in the team log",
         """
-        WITH teams AS (
-            SELECT game_id, team_id, bool_and(won) AS won, bool_or(won) AS any_won,
-                   sum(pts) AS pts
+        WITH players AS (
+            SELECT game_id, team_id, sum(pts) AS pts
             FROM nba.player_game_stats GROUP BY game_id, team_id
         )
-        SELECT game_id,
-               string_agg(t.abbreviation || ' ' || teams.pts ||
-                   CASE WHEN teams.won THEN ' (W)' WHEN teams.any_won THEN ' (W/L mixed)'
-                        ELSE ' (L)' END, ', ' ORDER BY teams.team_id)
-        FROM teams JOIN nba.teams t USING (team_id)
-        GROUP BY game_id
-        HAVING count(*) <> 2
-            OR count(*) FILTER (WHERE teams.won) <> 1
-            OR count(*) FILTER (WHERE teams.any_won AND NOT teams.won) > 0
-            OR max(teams.pts) FILTER (WHERE teams.won)
-               <= max(teams.pts) FILTER (WHERE NOT teams.any_won)
+        SELECT t.game_id || ' ' || t.team_id,
+               g.season || ' ' || t.team_abbreviation || ': players add up to '
+                   || coalesce(p.pts::text, 'nothing') || ', team scored ' || t.pts
+        FROM nba.team_game_stats t
+        JOIN nba.games g USING (game_id)
+        LEFT JOIN players p USING (game_id, team_id)
+        WHERE p.pts IS DISTINCT FROM t.pts
+        ORDER BY 1
+        """,
+    ),
+    Check(
+        "player_result_disagrees_with_team",
+        "player rows whose W/L or home/away differs from their team's row in the team log",
+        """
+        SELECT s.game_id || ' ' || s.team_id,
+               min(s.team_abbreviation) || ': ' || count(*) || ' player row(s) disagree'
+        FROM nba.player_game_stats s
+        JOIN nba.team_game_stats t USING (game_id, team_id)
+        WHERE s.won <> t.won OR s.is_home IS DISTINCT FROM t.is_home
+        GROUP BY s.game_id, s.team_id
+        ORDER BY 1
+        """,
+    ),
+    Check(
+        "games_without_team_scores",
+        "games without exactly two rows in the team log (team_game_stats)",
+        """
+        SELECT g.game_id, g.season || ' ' || g.season_type || ': '
+                   || count(t.team_id) || ' team row(s)'
+        FROM nba.games g LEFT JOIN nba.team_game_stats t USING (game_id)
+        GROUP BY g.game_id
+        HAVING count(t.team_id) <> 2
         ORDER BY 1
         """,
     ),
@@ -271,6 +290,24 @@ CHECKS = [
         JOIN nba.games g USING (game_id)
         JOIN nba.teams tm USING (team_id)
         WHERE t.minutes <= gl.length - {TEAM_MINUTES_SHORTFALL}
+        ORDER BY 1
+        """,
+    ),
+    Check(
+        "team_minutes_not_a_game_length",
+        f"team-log minutes that aren't {REGULATION_TEAM_MINUTES} plus a whole number of "
+        f"{OVERTIME_TEAM_MINUTES}-minute overtimes, or that differ between the two teams",
+        f"""
+        SELECT t.game_id || ' ' || t.team_id,
+               g.season || ' ' || t.team_abbreviation || ': ' || t.minutes || ' minutes, '
+                   || 'opponent ' || coalesce(o.minutes::text, 'not recorded')
+        FROM nba.team_game_stats t
+        JOIN nba.games g USING (game_id)
+        LEFT JOIN nba.team_game_stats o
+            ON o.game_id = t.game_id AND o.team_id = t.opponent_team_id
+        WHERE t.minutes < {REGULATION_TEAM_MINUTES}
+           OR (t.minutes - {REGULATION_TEAM_MINUTES}) %% {OVERTIME_TEAM_MINUTES} <> 0
+           OR t.minutes <> o.minutes
         ORDER BY 1
         """,
     ),
@@ -374,16 +411,27 @@ KNOWN_EXCEPTIONS = [
         "four 1985-88 box scores with more 3-pointers than field goals in the source",
     ),
     KnownException(
-        "result_doesnt_match_points",
-        game_ids_in("1946-47", "1989-90"),
-        "old box scores whose player rows don't add up to the team score: player points "
-        "are off (the source's team log confirms the W/L) or a player row is missing",
+        "player_points_dont_match_team_score",
+        game_ids_in("1946-47", "1995-96") + r" \d+",
+        "old box scores whose player rows don't add up to the team's score (points off, or "
+        "rows missing), and the players the source lost in 1990-96 (e.g. Loy Vaught)",
     ),
     KnownException(
-        "result_doesnt_match_points",
-        game_ids_in("1990-91", "1995-96"),
-        "games missing a player the source lost (no player ID in the box score), e.g. "
-        "Loy Vaught for the Clippers 1990-91 to 1995-96",
+        "player_points_dont_match_team_score",
+        r"0029600070 \d+",
+        "Sarunas Marciulionis (a Denver player that season) is listed under Cleveland; "
+        "moving his 7 points and 29 minutes would fix both teams, but the source is kept",
+    ),
+    KnownException(
+        "player_points_dont_match_team_score",
+        r"0029800661 1610612751",
+        "the Nets' player rows add up to 4 more than their score (97 vs 93); cause unknown",
+    ),
+    KnownException(
+        "team_minutes_not_a_game_length",
+        r"0026000250 \d+|0026100013 \d+|0026100029 \d+|0026100069 \d+|0022600231 \d+",
+        "team-log minutes errors (239, 247, 249 and 239 in 1960-62; Denver 168 on "
+        "2026-11-14, whose players add up to 242); the player rows are unaffected",
     ),
     KnownException(
         "team_minutes_short",

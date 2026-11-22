@@ -25,19 +25,22 @@ Decisions:
 | 2 | Project skeleton, lint, tests, Docker Postgres, CI | Done |
 | 3 | Tables and database roles | Done |
 | 4 | Convert NBA data into table rows; safe reloads | Done |
-| 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows, 305 MB |
+| 5 | Full history download (1946-47 on, plus play-in and NBA Cup finals), into the **local database first** | Done: 1.49M rows |
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
-| 8 | SQL safety checker | Next |
-| 9 | Connect Gemini (command-line first) | |
-| 10 | Retries, refusals, cost logging | |
-| 11 | Accuracy test | |
-| 12 | Web API, plus `docs/ARCHITECTURE.md` | |
-| 13 | Webpage | |
-| 14 | Neon setup and first AWS deploy | |
-| 15 | Automatic deploys | |
-| 16 | Daily update | |
-| 17 | Polish | |
+| 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
+| 9 | Playoff rounds and series (who won each round, champions) | Next |
+| 10 | Player details (position, height, birth date, draft) | |
+| 11 | SQL safety checker | |
+| 12 | Connect Gemini (command-line first) | |
+| 13 | Retries, refusals, cost logging | |
+| 14 | Accuracy test | |
+| 15 | Web API, plus `docs/ARCHITECTURE.md` | |
+| 16 | Webpage | |
+| 17 | Neon setup and first AWS deploy | |
+| 18 | Automatic deploys | |
+| 19 | Daily update | |
+| 20 | Polish | |
 
 ---
 
@@ -84,7 +87,7 @@ On your laptop:
   every day:  scheduled update ──► stats.nba.com (current season)    ──► database
 ```
 
-**Why the downloads run on your laptop:** stats.nba.com blocks cloud servers but allows home internet. We tested cdn.nba.com as a cloud-friendly alternative, but it refused even home requests (403), so we dropped it. Each daily run re-fetches the whole current season in one request and adds only what's new, so missed days catch up automatically.
+**Why the downloads run on your laptop:** stats.nba.com blocks cloud servers but allows home internet. We tested cdn.nba.com as a cloud-friendly alternative, but it refused even home requests (403), so we dropped it. Each daily run re-fetches the whole current season in two requests (player and team logs) and adds only what's new, so missed days catch up automatically.
 
 ---
 
@@ -119,7 +122,7 @@ On your laptop:
 
 **4. Convert NBA data into rows.** Loading twice changes nothing. Handles neutral-site games and team renames. Done.
 
-**5. Full history download.** Every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens in step 14.
+**5. Full history download.** Every season from 1946-47 (regular season, NBA Cup final, play-in and playoffs), into the **local database for now**. If it's interrupted, just rerun it. Done: 81 seasons in about 5 minutes, with old-data errors cleaned up (see `spikes/FINDINGS.md`). Copying to Neon happens in step 17.
 
 **6. NBA Cup rounds.** Each Cup game is tagged as group, quarterfinal, semifinal or final. Done.
 
@@ -140,29 +143,39 @@ On your laptop:
   - A 0 in minutes means "not recorded" when the team's minutes fall well short of the game length (common before 1985).
   - Players the source lost (e.g. Loy Vaught, Clippers 1990-96: the box score has his line but no player ID) and wrong minutes in some 2005-07 games are documented as known gaps. Repairing them from per-game box scores is possible later.
 
-**8. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+**8. Team scores and box scores.** Done. Load the source's team-level game log too: one more request per season and season type, giving each team's final score and team box score for every game, back to 1946-47.
+- A table with one row per team per game, so the AI can answer questions about final scores, margins and team records, and team totals stay right even in games where the source lost a player row.
+- A quality check that each team's player points add up to its score in every game, replacing the weaker "winner scored fewer points" check. Disagreements are reported, not corrected.
+- Decided while building it: the team log decides each game's home/away and result, because it's self-consistent and a few old player rows aren't (7 games).
 
-**9. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+**9. Playoff rounds and series.** Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down". Playoff game IDs appear to encode this (e.g. `0042300401`: round 4, the Finals, game 1), so it may need no extra requests. Check that against known results first.
 
-**10. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+**10. Player details.** Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center". First test which stats.nba.com endpoint has them: one request for every player, or one per player (about 5,000) for birth dates.
+- Out of scope, and the AI should refuse: awards, coaches, arenas, attendance, salaries, injuries, trades, play-by-play. Conferences and standings are possible later (about one request per season).
 
-**11. Accuracy test.**
+**11. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+
+**12. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+
+**13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+
+**14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
 - They run against a frozen copy of a few seasons, so the correct answers never change. The output is a score like "27/30".
 - It runs only when triggered by hand, to save the free AI allowance.
 
-**12. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
+**15. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
 - Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
-**13. Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
+**16. Webpage.** A question box, example questions, a results table, a "Show SQL" button, and friendly messages for refusals and limits.
 
-**14. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
+**17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
 
-**15. Automatic deploys** whenever code is merged to `main`.
+**18. Automatic deploys** whenever code is merged to `main`.
 
-**16. Daily update.** A scheduled task on your laptop fetches the current season, upserts it, and clears the cache. Missed days catch up automatically.
+**19. Daily update.** A scheduled task on your laptop fetches the current season, upserts it, and clears the cache. Missed days catch up automatically.
 
-**17. Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
+**20. Polish.** A README with the diagram, accuracy score, cost per question, and an explanation of the safety measures.
 
 ---
 
@@ -174,8 +187,8 @@ On your laptop:
 - **Upload the code as a zip, not a Docker image.** Simpler on AWS. Docker is still used locally and in testing.
 - **Season totals are calculated from game rows.** They always match the game data; rare edge cases may differ slightly from NBA.com.
 - **The one-sentence AI summary is off by default.** It would double AI usage per question.
-- **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 16.
-- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 10, 11) and storage: 305 MB, about 60% of Neon's free 0.5 GB. Check the real limit in step 14.
+- **Accuracy is tested on frozen data.** That keeps the score repeatable. Live data is checked in steps 7 and 19.
+- **Full history, with gaps.** Going back to 1946-47 means many stats are "not recorded" for older games. The cost is extra AI rules and tests (steps 7, 13, 14) and storage: 286 MB with team box scores, about 56% of Neon's free 0.5 GB. Check the real limit in step 17.
 - **Downloads run from a home machine,** because of stats.nba.com's block on cloud servers. The website itself is fully in the cloud.
 
 ## How we'll know it works

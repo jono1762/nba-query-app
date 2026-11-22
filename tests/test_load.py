@@ -13,12 +13,15 @@ from nba_query_app.ingest.load import load_batch, load_cup_rounds
 from nba_query_app.ingest.normalize import Batch, normalize_league_game_log
 
 FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games.json"
+TEAM_FIXTURE = Path(__file__).parent / "fixtures" / "leaguegamelog_2026-27_two_games_team.json"
 BOS = 1610612738
 
 
 @pytest.fixture
 def batch() -> Batch:
-    return normalize_league_game_log(json.loads(FIXTURE.read_text()))
+    return normalize_league_game_log(
+        json.loads(FIXTURE.read_text()), json.loads(TEAM_FIXTURE.read_text())
+    )
 
 
 @pytest.fixture
@@ -214,3 +217,17 @@ def test_reloading_a_cup_game_keeps_its_round(ingest: psycopg.Connection, batch:
         "SELECT nba_cup_round FROM nba.games WHERE game_id = %s", (batch.games[0].game_id,)
     ).fetchone()[0]
     assert round_ == "Semifinal"
+
+
+def test_team_box_scores_are_loaded_once(ingest: psycopg.Connection) -> None:
+    batch = normalize_league_game_log(
+        json.loads(FIXTURE.read_text()), json.loads(TEAM_FIXTURE.read_text())
+    )
+
+    assert load_batch(ingest, batch).team_stats == 4
+    assert load_batch(ingest, batch).total == 0  # reloading changes nothing
+    scores = ingest.execute(
+        "SELECT team_abbreviation, pts, opponent_pts, won FROM nba.team_game_stats "
+        "WHERE game_id = '0022600001' ORDER BY pts"
+    ).fetchall()
+    assert scores == [("BOS", 113, 121, False), ("DET", 121, 113, True)]

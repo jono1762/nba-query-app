@@ -3,9 +3,10 @@
 Used for the one-time history download and, later, the daily update (which is
 just this command for the current season).
 
-Each season and season type is fetched, converted and saved on its own, in one
-transaction. If the run stops partway, run it again: seasons already saved are
-re-checked quickly and unchanged rows are left alone. At the end, the data-quality
+Each season and season type is fetched (the player-level and the team-level log:
+two requests), converted and saved on its own, in one transaction. If the run
+stops partway, run it again: seasons already saved are re-checked quickly and
+unchanged rows are left alone. At the end, the data-quality
 checks (nba_query_app.quality) run over the whole database and print a report.
 
 Usage:
@@ -58,7 +59,7 @@ def backfill(
     seasons: Sequence[str],
     season_types: Sequence[str],
     *,
-    fetch: Callable[[str, str], dict[str, Any]] = fetch_league_game_log,
+    fetch: Callable[[str, str, str], dict[str, Any]] = fetch_league_game_log,
     pause_seconds: float = 1.0,
     sleep: Callable[[float], None] = time.sleep,
     log: Callable[[str], None] = print,
@@ -82,12 +83,14 @@ def backfill(
         if index:
             sleep(pause_seconds)  # be polite to stats.nba.com
         started = time.perf_counter()
-        response = fetch(season, season_type)
+        response = fetch(season, season_type, "player")
+        sleep(pause_seconds)
+        team_response = fetch(season, season_type, "team")
         rounds = {}
         if season_type == "NBA Cup Final":
             rounds = cup_rounds(response)
-            response = final_only(response)
-        batch = normalize_league_game_log(response)
+            response, team_response = final_only(response), final_only(team_response)
+        batch = normalize_league_game_log(response, team_response)
         loaded = load_batch(conn, batch)
         rounds_changed = load_cup_rounds(conn, rounds)
         result = SeasonResult(season, season_type, len(batch.stats), loaded, batch.cleanups)
@@ -96,7 +99,8 @@ def backfill(
         cleanup_note = "".join(f", {name}={n}" for name, n in sorted(batch.cleanups.items()))
         log(
             f"{season} {season_type:<14} {result.rows_fetched:>6} rows, "
-            f"{loaded.stats:>6} new/changed{cup_note}{cleanup_note}  "
+            f"{loaded.stats:>6} new/changed, {len(batch.team_stats)} team rows "
+            f"({loaded.team_stats} new/changed){cup_note}{cleanup_note}  "
             f"({time.perf_counter() - started:.1f}s)"
         )
     return results

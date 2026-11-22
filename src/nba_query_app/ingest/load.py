@@ -12,7 +12,14 @@ from dataclasses import astuple, dataclass, fields
 import psycopg
 from psycopg import sql
 
-from nba_query_app.ingest.normalize import Batch, Game, Player, PlayerGameStats, Team
+from nba_query_app.ingest.normalize import (
+    Batch,
+    Game,
+    Player,
+    PlayerGameStats,
+    Team,
+    TeamGameStats,
+)
 
 
 @dataclass(frozen=True)
@@ -23,10 +30,11 @@ class LoadResult:
     players: int
     games: int
     stats: int
+    team_stats: int
 
     @property
     def total(self) -> int:
-        return self.teams + self.players + self.games + self.stats
+        return self.teams + self.players + self.games + self.stats + self.team_stats
 
 
 def _upsert_sql(table: str, row_type: type, key: tuple[str, ...], only_if_newer: bool) -> sql.SQL:
@@ -67,6 +75,9 @@ UPSERT_GAMES = _upsert_sql("games", Game, ("game_id",), only_if_newer=False)
 UPSERT_STATS = _upsert_sql(
     "player_game_stats", PlayerGameStats, ("game_id", "player_id", "team_id"), only_if_newer=False
 )
+UPSERT_TEAM_STATS = _upsert_sql(
+    "team_game_stats", TeamGameStats, ("game_id", "team_id"), only_if_newer=False
+)
 
 # Bump the version only when something changed, so caches are cleared only when needed.
 BUMP_META = """
@@ -93,6 +104,7 @@ def load_batch(conn: psycopg.Connection, batch: Batch) -> LoadResult:
             players=_upsert(cur, UPSERT_PLAYERS, batch.players),
             games=_upsert(cur, UPSERT_GAMES, batch.games),
             stats=_upsert(cur, UPSERT_STATS, batch.stats),
+            team_stats=_upsert(cur, UPSERT_TEAM_STATS, batch.team_stats),
         )
         if result.total:
             latest = max((game.game_date for game in batch.games), default=None)
