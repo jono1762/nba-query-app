@@ -12,6 +12,7 @@ Built so far:
 - stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M player rows, 147K team rows and 286 MB. NBA Cup games are tagged with their round.
 - team box scores (final score and team totals) from the team-level log
 - playoff rounds and series (`games.playoff_round*` columns, `nba.playoff_series` view)
+- player details (`nba.player_details`: position, height, weight, birth date, college, country, draft)
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
 
@@ -37,6 +38,7 @@ uv run --env-file .env pytest                          # all tests
 uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated   # one test
 
 uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
+uv run --env-file .env python -m nba_query_app.ingest.player_details   # player details only (first run ~2 h for birth dates)
 uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
 ```
 
@@ -52,12 +54,13 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `ingest/fetch.py` calls stats.nba.com `LeagueGameLog`, which returns a whole season in one request: `level="player"` gives one row per player per game, `level="team"` one row per team per game. It also fetches player details: `fetch_player_index` (every player in history, one request) and `fetch_player_info` (one player, with birth date; `None` when the source has no record, which it signals with an empty body). All requests retry with increasing waits and raise `FetchError` after the last attempt.
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats` and `TeamGameStats`. It takes the player-level and team-level responses together (`normalize_team_game_log` handles the team one).
 - `ingest/load.py` upserts a `Batch` in one transaction.
+- `ingest/player_details.py` loads `nba.player_details` (position, height, weight, college, country, draft) from the player index in one request, then looks up birth dates one player at a time for players not yet checked (`birth_date_checked`), saving each as it arrives. So the first run takes about 2 hours, later ones only fetch new players, and an interrupted run resumes. Birth dates are kept out of the `PlayerDetails` dataclass and set by a separate UPDATE, like `nba_cup_round`, so reloading the index can't wipe them. The backfill runs it at the end; it also has its own CLI.
 - `ingest/cup.py` (pure) handles the NBA Cup request, which returns *every* Cup game: `final_only` keeps the final's rows for loading, and `cup_rounds` works out each game's round. A team's first 4 Cup games are group games, its 5th the quarterfinal, its 6th the semifinal, its 7th the final. `load.load_cup_rounds` then tags the stored games; it refuses if a Cup game isn't loaded yet, which is why the regular season comes first in `SEASON_TYPES`.
 - `ingest/playoffs.py` (pure) infers each playoff game's round and game number within its series from who played whom, since the source's round labels are unreliable before 2001-02. Completed playoffs count back from the Finals (the one series whose winner plays no later series), which handles old byes and uneven brackets. Playoffs in progress count forward with the current 4-round format. Anything that isn't a knockout bracket (a team in two series at once, a loser playing on) returns None: that's the 1953-54 round robin, left without rounds and counted. `normalize.py` adds the result to the playoff `Game` rows, because one playoffs request holds the whole season's playoffs.
 - Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.
-- The one deliberate exception is `games.nba_cup_round`. It's set by a separate UPDATE and kept out of `Game`, so reloading a regular season can't wipe it. Upserts only touch the columns they list.
+- The deliberate exceptions are `games.nba_cup_round` and `player_details.birth_date` (plus `birth_date_checked`). They're set by separate UPDATEs and kept out of the dataclasses, so reloading a regular season or the player index can't wipe them. Upserts only touch the columns they list.
 
 **Upserts change only what changed.**
 - `DO UPDATE … WHERE (cols) IS DISTINCT FROM (EXCLUDED cols)` skips unchanged rows.

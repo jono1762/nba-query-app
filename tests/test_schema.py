@@ -5,7 +5,15 @@ import pytest
 
 from nba_query_app.db.migrate import apply_migrations
 
-EXPECTED_TABLES = {"teams", "players", "games", "player_game_stats", "team_game_stats", "meta"}
+EXPECTED_TABLES = {
+    "teams",
+    "players",
+    "player_details",
+    "games",
+    "player_game_stats",
+    "team_game_stats",
+    "meta",
+}
 EXPECTED_VIEWS = {"player_season_stats", "stat_coverage", "stat_tracked_since", "playoff_series"}
 
 

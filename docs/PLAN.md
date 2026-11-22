@@ -30,7 +30,7 @@ Decisions:
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
 | 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
 | 9 | Playoff rounds and series (who won each round, champions) | Done, see `spikes/FINDINGS.md` |
-| 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | Next |
+| 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | In progress: loader built; birth dates downloading |
 | 11 | SQL safety checker | |
 | 12 | Connect Gemini (command-line first) | |
 | 13 | Retries, refusals, cost logging | |

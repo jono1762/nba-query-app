@@ -31,10 +31,15 @@ unchanged rows are skipped.
 uv run --env-file .env python -m nba_query_app.ingest.backfill                 # 1946-47 to now (~10 min)
 uv run --env-file .env python -m nba_query_app.ingest.backfill --from 2026-27  # just the current season
 uv run --env-file .env python -m nba_query_app.ingest.backfill --help          # all options
+uv run --env-file .env python -m nba_query_app.ingest.player_details           # player details only
 uv run --env-file .env python -m nba_query_app.quality                         # data-quality report
 ```
 
-The backfill ends with the data-quality report. It flags impossible or suspicious data
+The backfill ends by refreshing player details, then prints the data-quality report. The
+first time, player details take about 2 hours: birth dates need one request per player.
+After that only new players are looked up, and an interrupted run picks up where it stopped.
+
+The data-quality report flags impossible or suspicious data
 (e.g. a team whose player minutes don't add up) for a person to look at; it never
 blocks a load.
 
@@ -44,6 +49,8 @@ blocks a load.
 - `nba` schema: `teams`, `players`, `games`, `player_game_stats` (one row per
   player per team per game, from 1946-47), and `meta` (data version and newest game date).
   Stats that weren't recorded in early seasons are NULL ("not recorded"), not 0.
+- `nba.player_details`: one row per player with position, height, weight, birth date,
+  college, country and draft (single values for the whole career, as NBA.com lists them).
 - `nba.team_game_stats`: one row per team per game (final score and team totals), from
   the source's team-level log.
 - Playoff games have their round and game number in the series (`nba.games.playoff_round`,
