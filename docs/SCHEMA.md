@@ -121,7 +121,7 @@ is a single figure for the whole career, not per season.
 | `birth_date` | Date of birth. Age on a game day is `age(game_date, birth_date)`. NULL for 16 players (see "Known data gaps"). |
 | `college` | Last school before the NBA: usually a college, sometimes a high school or a club abroad. |
 | `country` | Country, e.g. `USA`, `France`. |
-| `draft_year`, `draft_round`, `draft_number` | The draft the player was picked in, the round and the overall pick. NULL if undrafted or not recorded (the draft began in 1947); about 72% of players have a draft year. Early territorial picks have a year but no round. |
+| `draft_year`, `draft_round`, `draft_number` | The draft the player was picked in, the round and the overall pick. NULL if undrafted or not recorded (the draft began in 1947); about 72% of players have a draft year. Early territorial picks have a year but no round. Only the year is stored, so age at the draft is approximate (it can be off by a year); age in a game is exact. |
 | `birth_date_checked` | Bookkeeping for the loader: true once the birth date has been looked up. |
 
 ### `nba.teams`
