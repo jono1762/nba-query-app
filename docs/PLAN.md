@@ -29,8 +29,8 @@ Decisions:
 | 6 | NBA Cup round on each game (group / quarterfinal / semifinal / final) | Done |
 | 7 | Season totals and data-quality checks | Done, see `spikes/FINDINGS.md` |
 | 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
-| 9 | Playoff rounds and series (who won each round, champions) | In progress: inferred and stored |
-| 10 | Player details (position, height, birth date, draft) | |
+| 9 | Playoff rounds and series (who won each round, champions) | Done, see `spikes/FINDINGS.md` |
+| 10 | Player details (position, height, birth date, draft) | Next |
 | 11 | SQL safety checker | |
 | 12 | Connect Gemini (command-line first) | |
 | 13 | Retries, refusals, cost logging | |
@@ -148,7 +148,7 @@ On your laptop:
 - A quality check that each team's player points add up to its score in every game, replacing the weaker "winner scored fewer points" check. Disagreements are reported, not corrected.
 - Decided while building it: the team log decides each game's home/away and result, because it's self-consistent and a few old player rows aren't (7 games).
 
-**9. Playoff rounds and series.** Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down".
+**9. Playoff rounds and series.** Done. Tag each playoff game with its round and series, so the AI can answer "who won the 2016 Finals?" or "teams that came back from 3-1 down".
 - Decided: **infer them from who played whom**, counting back from the Finals. Game IDs (and the `CommonPlayoffSeries` endpoint, which is the same data) encode the round reliably only from 2001-02; older IDs are sequential or inconsistent (e.g. the 1975 Finals split across two series IDs). Game IDs and known champions serve as cross-checks.
 
 **10. Player details.** Position, height, birth date and draft year, for questions like "youngest player to score 50" or "best rookie season by a center". First test which stats.nba.com endpoint has them: one request for every player, or one per player (about 5,000) for birth dates.
