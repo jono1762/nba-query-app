@@ -636,3 +636,36 @@ def test_player_team_missing_from_the_team_log_is_an_error(
     set_team_column(team_response, "TEAM_ID", 1, row_index=0)  # BOS replaced
     with pytest.raises(NormalizeError, match="doesn't list it"):
         normalize_league_game_log(response, team_response)
+
+
+def as_playoffs(response: dict) -> dict:
+    """The same games relabelled as 2026-27 playoff games."""
+    for row_index in range(len(response["resultSets"][0]["rowSet"])):
+        set_column(response, "SEASON_ID", "42026", row_index)
+    return response
+
+
+def test_playoff_games_get_a_round_and_game_number(response: dict, team_response: dict) -> None:
+    batch = normalize_league_game_log(as_playoffs(response), as_playoffs(team_response))
+
+    # Two series under way, each one game in: the first round of playoffs in progress.
+    rounds = {(g.playoff_round, g.playoff_round_name, g.playoff_series_game) for g in batch.games}
+    assert rounds == {(1, "First Round", 1)}
+
+
+def test_regular_season_games_have_no_playoff_round(response: dict, team_response: dict) -> None:
+    batch = normalize_league_game_log(response, team_response)
+    assert all(g.playoff_round is None for g in batch.games)
+
+
+def test_playoffs_that_arent_a_bracket_are_left_without_rounds(
+    response: dict, team_response: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(  # what playoff_rounds says for e.g. the 1953-54 round robin
+        "nba_query_app.ingest.normalize.playoff_rounds", lambda season, rows: None
+    )
+
+    batch = normalize_league_game_log(as_playoffs(response), as_playoffs(team_response))
+
+    assert all(g.playoff_round is None for g in batch.games)
+    assert batch.cleanups == {"playoff_rounds_not_inferred": 2}

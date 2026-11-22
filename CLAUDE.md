@@ -11,6 +11,7 @@ Built so far:
 - `nba` schema and database roles
 - stats.nba.com downloader, normalizer, loader and backfill CLI. The local DB holds 1946-47 to now: regular season, NBA Cup final, play-in and playoffs, about 1.49M player rows, 147K team rows and 286 MB. NBA Cup games are tagged with their round.
 - team box scores (final score and team totals) from the team-level log
+- playoff rounds and series (`games.playoff_round*` columns, `nba.playoff_series` view)
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
 
@@ -52,6 +53,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - `ingest/normalize.py` is pure, with no network or database access. It turns the response into a `Batch` of frozen dataclasses: `Team`, `Player`, `Game`, `PlayerGameStats` and `TeamGameStats`. It takes the player-level and team-level responses together (`normalize_team_game_log` handles the team one).
 - `ingest/load.py` upserts a `Batch` in one transaction.
 - `ingest/cup.py` (pure) handles the NBA Cup request, which returns *every* Cup game: `final_only` keeps the final's rows for loading, and `cup_rounds` works out each game's round. A team's first 4 Cup games are group games, its 5th the quarterfinal, its 6th the semifinal, its 7th the final. `load.load_cup_rounds` then tags the stored games; it refuses if a Cup game isn't loaded yet, which is why the regular season comes first in `SEASON_TYPES`.
+- `ingest/playoffs.py` (pure) infers each playoff game's round and game number within its series from who played whom, since the source's round labels are unreliable before 2001-02. Completed playoffs count back from the Finals (the one series whose winner plays no later series), which handles old byes and uneven brackets. Playoffs in progress count forward with the current 4-round format. Anything that isn't a knockout bracket (a team in two series at once, a loser playing on) returns None: that's the 1953-54 round robin, left without rounds and counted. `normalize.py` adds the result to the playoff `Game` rows, because one playoffs request holds the whole season's playoffs.
 - Network, sleep and logging are injected as parameters (`request=`, `fetch=`, `sleep=`, `log=`), so tests never hit stats.nba.com or actually wait.
 
 **The dataclasses are the column contract.** `load.py` builds its `INSERT … ON CONFLICT` SQL from `dataclasses.fields()`, so each field name must equal a column name. Adding a column means updating both the migration and the dataclass.

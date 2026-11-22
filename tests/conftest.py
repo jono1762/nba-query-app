@@ -113,22 +113,27 @@ class NbaData:
         game_date: str | None = None,
         neutral_site: bool = False,
         nba_cup_round: str | None = None,
+        playoff_round: tuple[int, str, int] | None = None,  # (round, name, series game)
     ) -> None:
         self.team(home)
         self.team(away)
-        day = game_date or f"{season[:4]}-12-01"
+        round_number, round_name, series_game = playoff_round or (None, None, None)
         self.conn.execute(
             "INSERT INTO nba.games (game_id, game_date, season, season_type, home_team_id, "
-            "away_team_id, neutral_site, nba_cup_round) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            "away_team_id, neutral_site, nba_cup_round, playoff_round, playoff_round_name, "
+            "playoff_series_game) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             (
                 game_id,
-                day,
+                game_date or f"{season[:4]}-12-01",
                 season,
                 season_type,
                 None if neutral_site else home,
                 None if neutral_site else away,
                 neutral_site,
                 nba_cup_round,
+                round_number,
+                round_name,
+                series_game,
             ),
         )
         self._games[game_id] = (home, away, neutral_site)

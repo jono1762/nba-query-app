@@ -25,6 +25,7 @@ ConnectAs = Callable[[str], psycopg.Connection]
         "player_season_stats",
         "stat_coverage",
         "stat_tracked_since",
+        "playoff_series",
     ],
 )
 def test_reader_can_select_every_table(connect_as: ConnectAs, table: str) -> None:
