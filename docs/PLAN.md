@@ -99,6 +99,7 @@ On your laptop:
    - the table layout, with column descriptions
    - basketball terms ("triple-double")
    - a few example questions with their correct SQL
+   - player names found in the question, looked up in the database first (e.g. "Eddie Johnson" matches two players, with their seasons), so the AI doesn't have to guess which one is meant
    - **today's date, the current season ("2026-27"), and the date of the latest game in the database**
 4. **Gemini replies in a fixed format:** "can this be answered?", a reason, and the SQL. If the answer is no, we politely refuse.
 5. **Safety check on the SQL.**
@@ -112,7 +113,7 @@ On your laptop:
 9. **Show** the plain-English answer, the results table, and the SQL (behind a "Show SQL" toggle).
 10. **Log** each request: question, SQL, success or failure, retries, AI calls and tokens used, estimated cost, and time taken.
 
-That is the base case: write SQL, run it, phrase the answer, so at least two AI calls per question. A variant tested in step 14 lets the AI explore the database before answering (see step 12).
+So each question takes two AI calls: write the SQL, then phrase the answer (plus up to 2 more if the query errors).
 
 ---
 
@@ -164,7 +165,7 @@ That is the base case: write SQL, run it, phrase the answer, so at least two AI 
 **12. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
 - **Base case:** the AI writes the SQL, our code safety-checks and runs it, and a second AI call phrases the answer from the result rows (see "What happens when someone asks a question").
 - Build it behind a small interface (question in, answer, rows, SQL and usage out), so a different strategy can replace it without touching the rest.
-- **Variant to compare:** a bounded "agent" loop. The AI gets tools it can call several times before answering: `run_sql` (same safety check, read-only user and row limit) and `find_player` (look up a name, e.g. which of the two Eddie Johnsons is meant). It's capped at about 4 tool calls and about 20 seconds in total, because API Gateway cuts requests off at 29 seconds. It can handle multi-step questions and check its own results, but costs more AI calls per question.
+- **Not now: an "agent" loop**, where the AI gets a `run_sql` tool and can query several times before answering. It handles multi-step questions better, but multiplies AI calls on a free tier that's already the tightest limit. Revisit only if the accuracy test shows the base case failing on multi-step questions; the interface above makes it a drop-in change (capped at about 4 tool calls and 20 seconds, since API Gateway cuts requests off at 29 seconds).
 
 **13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
 
@@ -172,7 +173,7 @@ That is the base case: write SQL, run it, phrase the answer, so at least two AI 
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
 - They run against a frozen copy of a few seasons, so the correct answers never change. The output is a score like "27/30".
 - Each answer is checked twice: are the result rows right, and does the plain-English answer say only what the rows show?
-- Run both strategies from step 12 (base case and agent loop) on the same questions, and compare score, AI calls per question and time taken. Keep the loop only if it's clearly more accurate for the extra calls; record the comparison in the README either way.
+- Note which kinds of question fail (wrong table, misread stat, multi-step logic), since that decides what to improve: the instructions and examples, or an agent loop (see step 12).
 - It runs only when triggered by hand, to save the free AI allowance.
 
 **15. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
