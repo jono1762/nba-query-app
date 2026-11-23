@@ -56,11 +56,10 @@ One row per game.
 | `neutral_site` | True for games at a neutral venue (Mexico City, Paris, the Las Vegas NBA Cup semifinals). Older neutral-site games are listed with a home team in the source. |
 | `nba_cup_round` | NBA Cup round: `Group`, `Quarterfinal`, `Semifinal` or `Final`. NULL for non-Cup games. Group, quarterfinal and semifinal games are also regular-season games. |
 | `playoff_round` | Playoff round number: 1 = that season's first round, up to the Finals. The number of rounds varies (4 since 1983-84). |
-| `playoff_round_name` | `First Round`, `Conference Semifinals`, `Conference Finals` or `Finals`; before 1970-71, `Division Semifinals` and `Division Finals`. |
-| `playoff_series_game` | Game number within the playoff series (1 = first game). |
+| `playoff_round_name` | `First Round`, `Conference Semifinals`, `Conference Finals` or `Finals`; before 1970-71, `Division Semifinals` and `Division Finals`. The 1953-54 playoffs began with a `Round Robin` (each team in a division played the others) before the division finals and Finals. |
+| `playoff_series_game` | Game number within the playoff series (1 = first game). In the 1953-54 round robin, the game number between those two teams. |
 
-The three playoff columns are NULL for non-playoff games, and for the 1953-54
-playoffs, which began with a round robin rather than series.
+The three playoff columns are NULL for non-playoff games.
 
 ### `nba.player_game_stats`
 One row per player per team per game they played in: the box score line. A player
@@ -159,7 +158,8 @@ combined. Calculated from `player_game_stats`, so the two always agree.
 | `minutes`, `pts`, `fgm`, `fga`, `fg3m`, `fg3a`, `ftm`, `fta`, `oreb`, `dreb`, `reb`, `ast`, `stl`, `blk`, `tov`, `pf`, `plus_minus` | Totals. A total is NULL unless the stat was recorded in every one of the player's games that season, so it never undercounts. |
 
 ### `nba.playoff_series`
-One row per playoff series (every season except 1953-54).
+One row per playoff series. The 1953-54 round robin wasn't a series, so it isn't
+listed; that season's division finals and Finals are.
 
 | Column | Meaning |
 |---|---|
@@ -219,7 +219,6 @@ load. Details are in `spikes/FINDINGS.md`.
   1996-97, player points don't add up to the team's score. The source values are
   kept.
 - **Wrong minutes** in about 70 team-games in 2005-06 and 2006-07.
-- **The 1953-54 playoffs** have no rounds (a round-robin format).
 - **Missing birth dates** for 16 players: 14 from 1946-47 to 1954-55, for whom
   NBA.com lists a placeholder date (stored as NULL), plus Bobby Watson (1952-53,
   missing from NBA.com's player list, so all his details are NULL) and Corey

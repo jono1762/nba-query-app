@@ -68,6 +68,7 @@ KNOWN_TOTALS = [
 # (season, champion's team_id, name at the time).
 KNOWN_CHAMPIONS = [
     ("1946-47", 1610612744, "Philadelphia Warriors"),
+    ("1953-54", 1610612747, "Minneapolis Lakers"),  # after a round robin
     ("1961-62", 1610612738, "Boston Celtics"),
     ("1966-67", 1610612755, "Philadelphia 76ers"),
     ("1970-71", 1610612749, "Milwaukee Bucks"),
@@ -576,12 +577,6 @@ KNOWN_EXCEPTIONS = [
         r"Wilt Chamberlain career pts|Hakeem Olajuwon career blk|Wilt Chamberlain 1960-61 reb",
         "the source's game logs fall slightly short of the official totals (2 points, 5 "
         "blocks, 76 rebounds); not investigated game by game, kept as they are",
-    ),
-    KnownException(
-        "playoff_games_without_round",
-        game_ids_in("1953-54", "1953-54"),
-        "the 1953-54 playoffs began with a round robin (three teams in each division each "
-        "playing the other two), so they aren't a knockout bracket",
     ),
     KnownException(
         "uneven_games_per_team",
