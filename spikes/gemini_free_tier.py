@@ -25,7 +25,8 @@ Usage:
     uv run --env-file .env spikes/gemini_free_tier.py probe
     uv run --env-file .env spikes/gemini_free_tier.py format basic|hard <model> [model ...]
 
-Saves raw results to spikes/output/gemini_<part>.json (gemini_format_<set>.json).
+Saves raw results to spikes/output/gemini_probe.json and
+gemini_format_<set>_<date-time>.json.
 """
 
 import json
@@ -137,8 +138,24 @@ def key() -> str:
     return k
 
 
-def generate(model: str, body: dict, timeout: int = 60) -> tuple[int, dict, float]:
-    """POST one request. A timeout comes back as status 0 rather than stopping the run."""
+def generate(
+    model: str, body: dict, timeout: int = 60, overload_retries: int = 0
+) -> tuple[int, dict, float]:
+    """POST one request. A timeout comes back as status 0 rather than stopping the run.
+
+    "High demand" (503) is retried up to overload_retries times, waiting 15, 30, 60 s.
+    """
+    for attempt in range(overload_retries):
+        status, data, secs = _post(model, body, timeout)
+        if status != 503:
+            return status, data, secs
+        wait = 15 * 2**attempt
+        print(f"  {model}: 503 high demand, retrying in {wait} s", flush=True)
+        time.sleep(wait)
+    return _post(model, body, timeout)
+
+
+def _post(model: str, body: dict, timeout: int) -> tuple[int, dict, float]:
     started = time.perf_counter()
     try:
         resp = requests.post(
@@ -173,7 +190,10 @@ def probe() -> None:
             row["error"] = err.get("message", "")[:300]
             row["quota"] = quota_details(err)
         results.append(row)
-        print(f"{model:28} {status}  {secs:5.1f}s  {row.get('text') or row.get('error', '')[:90]}")
+        print(
+            f"{model:28} {status}  {secs:5.1f}s  {row.get('text') or row.get('error', '')[:90]}",
+            flush=True,
+        )
         time.sleep(2)
     save("probe", results)
 
@@ -214,11 +234,11 @@ def format_test(question_set: str, models: list[str]) -> None:
                     "temperature": 0,
                 },
             }
-            status, data, secs = generate(model, body, timeout=120)
+            status, data, secs = generate(model, body, timeout=240, overload_retries=3)
             row = {"model": model, "question": question, "status": status, "seconds": secs}
             if status != 200:
                 row["error"] = data.get("error", {}).get("message", "")[:300]
-                print(f"{model:24} {status} {question[:50]}  {row['error'][:80]}")
+                print(f"{model:24} {status} {question[:50]}  {row['error'][:80]}", flush=True)
                 results.append(row)
                 time.sleep(5)
                 continue
@@ -233,10 +253,11 @@ def format_test(question_set: str, models: list[str]) -> None:
             print(
                 f"{model:24} {secs:5.1f}s in={u.get('promptTokenCount')} "
                 f"out={u.get('candidatesTokenCount')} think={u.get('thoughtsTokenCount', 0)} "
-                f"{'OK ' if not row['problems'] else 'BAD'} {question[:45]}  {row['problems']}"
+                f"{'OK ' if not row['problems'] else 'BAD'} {question[:45]}  {row['problems']}",
+                flush=True,
             )
             time.sleep(5)
-    save(f"format_{question_set}", results)
+    save(f"format_{question_set}_{time.strftime('%Y%m%d-%H%M')}", results)
     for model in models:
         rows = [r for r in results if r["model"] == model and r["status"] == 200]
         bad = [r for r in rows if r["problems"]]
