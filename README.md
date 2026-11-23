@@ -76,7 +76,8 @@ blocks a load.
 ```
 src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading,
                      quality.py: data-quality checks,
-                     query/: SQL safety checker and read-only query runner,
+                     query/: SQL safety checker, read-only query runner, the AI's
+                     instructions and player-name lookup,
                      llm/: AI model interface and Gemini client)
 migrations/          database schema changes (numbered SQL files)
 tests/               automated tests
