@@ -26,12 +26,13 @@ The phased plan, with decisions, trade-offs and a progress table, is in `docs/PL
 
 ## Commands
 
-Use uv for everything; there's no plain pip workflow. Database tests and the migration runner read `DATABASE_URL`, which `--env-file .env` provides (copy it from `.env.example`).
+Use uv for everything; there's no plain pip workflow. Database tests and the migration runner read `DATABASE_URL` (the admin login); anything that runs AI-written SQL reads `READER_DATABASE_URL` (a read-only login). `--env-file .env` provides both (copy it from `.env.example`).
 
 ```bash
 uv sync                                                # create .venv, install deps
 docker compose up -d                                   # local Postgres 16 on :5432
 uv run --env-file .env python -m nba_query_app.db.migrate   # apply migrations
+docker compose exec db psql -U nba -c "CREATE ROLE nba_app_reader LOGIN PASSWORD 'reader_local_dev' IN ROLE nba_reader"   # once: read-only login (READER_DATABASE_URL)
 
 uv run ruff check . && uv run ruff format --check .    # lint + format check (CI runs both)
 uv run --env-file .env pytest                          # all tests
@@ -104,7 +105,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Brackets nested more than about 45 deep hit Python's recursion limit inside sqlglot; that's refused as "nested too deeply".
 
 **Running AI-written SQL** (`query/run.py`): `run_query(conn, sql)` checks the SQL, then `run_read_only` runs it with Postgres's own guards, which hold even if the checker misses something. Tests call `run_read_only` directly to prove that.
-- It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that means AI-written SQL needs a login user in `nba_reader`.
+- It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that's `nba_app_reader` (`READER_DATABASE_URL`, created once with the command above).
 - One transaction: `SET TRANSACTION READ ONLY`, then `statement_timeout` (5 s by default) and `search_path = nba` as `SET LOCAL`, which end with the transaction, so the connection can be reused. The connection must not already be in a transaction.
 - The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
 - A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.

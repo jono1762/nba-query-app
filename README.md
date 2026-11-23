@@ -16,6 +16,10 @@ cp .env.example .env         # local settings (git-ignored)
 docker compose up -d         # start local Postgres on localhost:5432
 uv run --env-file .env python -m nba_query_app.db.migrate   # create/update tables
 
+# once: the read-only login AI-written SQL runs as (READER_DATABASE_URL in .env)
+docker compose exec db psql -U nba -c \
+  "CREATE ROLE nba_app_reader LOGIN PASSWORD 'reader_local_dev' IN ROLE nba_reader"
+
 uv run ruff check .                  # lint
 uv run ruff format .                 # auto-format
 uv run --env-file .env pytest        # all tests (database tests need Postgres running)
