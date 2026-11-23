@@ -401,6 +401,18 @@ Script: `spikes/gemini_free_tier.py` (`probe`, then `format basic|hard <model> .
   - The 1954 Lakers title was missing from the data (the 1953-54 playoffs had no
     rounds), so "most championships" gave the Lakers 16, not 17. Fixed on its own
     branch (`fix/1954-playoffs`).
+- **Through the real flow** (`python -m nba_query_app.ask`, with the name lookup and
+  the instructions in `query/prompt.py`), all 24 questions on `gemini-3.1-flash-lite`:
+  22 of the 23 that completed were right, including Luka Dončić's 11 50-point games
+  (the name lookup fixed the accent miss) and the youngest 40-point scorer, now
+  "18 years, 11 months, and 25 days" (ages had come back as a day count). The miss:
+  the 30-point streak, where it filtered to 30-point games before numbering them, so
+  a career total (LeBron, 577) passed for a streak. One line of guidance on streaks
+  fixed it (Wilt 65; Kevin Garnett's double-double streak, 37, also right).
+  About 5,400-6,000 tokens and 2-11 s per question, two calls.
+- **Gemini's overload errors are common:** in about 30 calls through the flow, two
+  were "high demand" (503) and one took longer than 20 s, each on the second call.
+  Step 13 adds retries and a fallback model.
 - **Decision: start with `gemini-3.1-flash-lite`**, as one setting so it's easy to
   change. Move to a stronger model only if the accuracy test (step 14) shows it
   isn't good enough.
