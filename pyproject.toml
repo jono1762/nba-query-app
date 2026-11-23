@@ -8,6 +8,7 @@ dependencies = [
     "nba-api>=1.10",
     "psycopg[binary]>=3.2",
     "requests>=2.31",
+    "sqlglot>=30.33.0",
 ]
 
 [dependency-groups]

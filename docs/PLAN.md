@@ -31,8 +31,8 @@ Decisions:
 | 8 | Team scores and box scores, checked against player rows | Done, see `spikes/FINDINGS.md` |
 | 9 | Playoff rounds and series (who won each round, champions) | Done, see `spikes/FINDINGS.md` |
 | 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | Done, see `docs/SCHEMA.md` and `spikes/FINDINGS.md` |
-| 11 | SQL safety checker | Next |
-| 12 | Connect Gemini (command-line first) | |
+| 11 | SQL safety checker | Done |
+| 12 | Connect Gemini (command-line first) | Next |
 | 13 | Retries, refusals, cost logging | |
 | 14 | Accuracy test | |
 | 15 | Web API, plus `docs/ARCHITECTURE.md` | |
@@ -161,7 +161,10 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 - Out of scope, and the AI should refuse: awards, coaches, arenas, attendance, salaries, injuries, trades, play-by-play. Conferences and standings are possible later (about one request per season).
 - Once the tables are final, write **`docs/SCHEMA.md`**: every table and view, what one row means, how they join, the columns in plain language, which stats are missing in early seasons, and the known data gaps. It's the human-readable version of what the AI will be told about the database. A test checks that it mentions every table, view and column, so it can't silently go stale.
 
-**11. SQL safety checker (no AI yet).** Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+**11. SQL safety checker (no AI yet).** Done. Many "try to break it" tests: writes, sneaking in two queries, system tables, slow-down tricks, and so on.
+- Decided: the checker uses **allowlists**, not blocklists. Only listed tables (the `nba` ones) and listed functions (everyday sums, averages, rankings, text and date functions) are accepted, so anything unexpected is refused by default. A refusal comes with a reason that can be sent back to the AI.
+- Decided: the database guards the query too, so a gap in the checker still can't change data or run long. The query runs as the read-only user, in a read-only transaction, with a 5-second limit, through a "cursor" (Postgres hands over rows a batch at a time, and only accepts a single SELECT there), and only the first 100 rows are fetched. The code refuses to run AI-written SQL as a user that can write, so a setup mistake can't slip through. Tests skip the checker to prove these guards hold on their own.
+- Decided: the SQL runs exactly as the AI wrote it, which is also what "Show SQL" will display. (The checking library can rewrite SQL, but it renames some functions, so rewritten SQL could behave differently.)
 
 **12. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
 - **Base case:** the AI writes the SQL, our code safety-checks and runs it, and a second AI call phrases the answer from the result rows (see "What happens when someone asks a question").

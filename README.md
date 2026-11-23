@@ -71,7 +71,8 @@ blocks a load.
 
 ```
 src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading,
-                     quality.py: data-quality checks)
+                     quality.py: data-quality checks,
+                     query/: SQL safety checker and read-only query runner)
 migrations/          database schema changes (numbered SQL files)
 tests/               automated tests
 docs/PLAN.md         the build plan, decisions and progress

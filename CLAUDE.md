@@ -15,9 +15,9 @@ Built so far:
 - player details (`nba.player_details`: position, height, weight, birth date, college, country, draft)
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
+- SQL safety checker, and a runner that runs checked SQL as the read-only user
 
 Not built yet:
-- SQL safety checker
 - LLM pipeline and accuracy eval
 - API and frontend
 - AWS deploy
@@ -97,6 +97,18 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 
 **Data-quality checks** (`quality.py`) are SQL queries that each return `(key, detail)` rows, one per violation: impossible values, points or rebounds that don't add up, values above all-time records, player points that don't add up to the team's score in the team log, team minutes that aren't a valid game length or (for player rows) fall well short of the game length (usually a player row missing from the source), uneven games per team, playoff games without an inferred round or whose round differs from the game ID (from 2001-02), players without details or a birth date, implausible ages (under 18 or over 45), draft years more than a year after a player's first season, and spot-checks against well-known official totals and champions (`KNOWN_TOTALS`, e.g. Kareem's 38,387 career points; `KNOWN_CHAMPIONS`). They only report; they never block a load or change data. Violations that were investigated and accepted go in `KNOWN_EXCEPTIONS` (a regex on the key, plus the reason), so new problems stand out. Queries get a `%(current_season)s` parameter, so a literal `%` must be written `%%`. The exit code is 1 if anything unexplained is found.
 
+**SQL safety checker** (`query/safety.py`, pure): `check_sql` parses AI-written SQL with sqlglot and raises `UnsafeSqlError` (with a reason fit to send back to the AI) unless it passes allowlists. Anything not listed is refused.
+- Exactly one statement, and it must be SELECT (with WITH/UNION/INTERSECT/EXCEPT). Writes hidden inside it (`WITH d AS (DELETE … RETURNING *)`), `SELECT … INTO`, `FOR UPDATE`, `WITH RECURSIVE` and anything sqlglot only half-parses (`exp.Command`) are refused.
+- Tables: only `ALLOWED_TABLES` in the `nba` schema, bare or `nba.`-qualified. WITH names may not start with `pg_`, because Postgres searches `pg_catalog` first, so a `pg_` name outside the WITH's scope would reach a system table. **A new table or view must be added to `ALLOWED_TABLES`**; a test compares it with the database.
+- Functions: sqlglot gives known functions their own node class (`ALLOWED_FUNCTION_TYPES`; note that AND, OR, CASE branches, `~` and `~*` are function nodes too) and the rest `exp.Anonymous` (`ALLOWED_FUNCTION_NAMES`). Schema-qualified calls and `reg*` casts are refused. sqlglot renames some functions (`to_char` is `TimeToStr`, `string_agg` is `GroupConcat`), so check the node class with `sqlglot.parse_one(sql, read="postgres")` before adding one.
+- Brackets nested more than about 45 deep hit Python's recursion limit inside sqlglot; that's refused as "nested too deeply".
+
+**Running AI-written SQL** (`query/run.py`): `run_query(conn, sql)` checks the SQL, then `run_read_only` runs it with Postgres's own guards, which hold even if the checker misses something. Tests call `run_read_only` directly to prove that.
+- It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that means AI-written SQL needs a login user in `nba_reader`.
+- One transaction: `SET TRANSACTION READ ONLY`, then `statement_timeout` (5 s by default) and `search_path = nba` as `SET LOCAL`, which end with the transaction, so the connection can be reused. The connection must not already be in a transaction.
+- The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
+- A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.
+
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 
 **Roles** (`002_create_roles.sql`) are NOLOGIN groups. Each environment creates its own login users, so no passwords live in migrations.
@@ -106,7 +118,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 Consequences of this setup:
 - `TEMPORARY` is revoked from PUBLIC. No role except the admin can create temp tables, which rules out COPY-into-temp-table loading for `nba_ingest`.
 - `ALTER ROLE … SET` (e.g. `statement_timeout`) isn't inherited through group membership. Set it on the login user or per transaction.
-- `nba_reader` can still read `pg_catalog`, which every role can by default. The SQL safety checker must block system catalogs.
+- `nba_reader` can still read `pg_catalog`, which every role can by default. The SQL safety checker blocks system catalogs.
 
 **Tests.**
 - The `test_db_url` and `db` fixtures in `tests/conftest.py` create a fresh, uniquely named database per test and drop it afterwards.
