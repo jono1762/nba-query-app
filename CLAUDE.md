@@ -108,6 +108,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that's `nba_app_reader` (`READER_DATABASE_URL`, created once with the command above).
 - One transaction: `SET TRANSACTION READ ONLY`, then `statement_timeout` (5 s by default) and `search_path = nba` as `SET LOCAL`, which end with the transaction, so the connection can be reused. The connection must not already be in a transaction.
 - The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
+- Intervals (e.g. `age(game_date, birth_date)`) come back as Postgres's text, `'18 years 11 mons 25 days'`, not a Python timedelta, which counts only days.
 - A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.
 
 **The AI's instructions** (`query/prompt.py`, `query/players.py`).

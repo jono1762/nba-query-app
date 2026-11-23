@@ -14,6 +14,10 @@ Postgres itself, so they hold even if the checker misses something:
   the query would return.
 - search_path is set to nba for the transaction, so bare table names work.
 
+Intervals (e.g. age(game_date, birth_date)) come back as Postgres writes them,
+'18 years 11 mons 25 days', rather than as a Python timedelta, which only counts
+days and would turn an age into "6,925 days".
+
 The settings use SET LOCAL, which lasts only until the transaction ends, so the
 connection is back to normal afterwards and can be reused.
 """
@@ -23,6 +27,7 @@ from typing import Any
 
 import psycopg
 from psycopg import pq
+from psycopg.types.string import TextLoader
 
 from nba_query_app.query.safety import check_sql
 
@@ -82,6 +87,7 @@ def run_read_only(
             conn.execute("SET LOCAL search_path = nba")
             _refuse_write_access(conn)
             with conn.cursor(name="answer") as cur:
+                cur.adapters.register_loader("interval", TextLoader)
                 cur.execute(sql)
                 rows = cur.fetchmany(max_rows + 1)
                 columns = [column.name for column in cur.description or []]
