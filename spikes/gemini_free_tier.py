@@ -1,6 +1,6 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["requests>=2.31", "sqlglot>=30.33.0"]
+# dependencies = ["psycopg[binary]>=3.2", "requests>=2.31", "sqlglot>=30.33.0"]
 # ///
 """Spike: which Gemini models are free, how fast, and is the fixed reply format reliable?
 
@@ -10,16 +10,22 @@ Two parts:
 2. **Format.** Real questions, with docs/SCHEMA.md as the table description, asking for
    the fixed reply {answerable, reason, sql} through Gemini's structured output (a JSON
    schema the reply must follow). Each reply is checked: valid JSON, the right fields,
-   SQL present exactly when answerable, and the SQL parses as Postgres.
+   SQL present exactly when answerable, and the SQL parses as Postgres. If DATABASE_URL
+   is set, each query is also run in a read-only transaction (10-second limit) and the
+   first rows are saved, to compare with the correct answers by hand.
+
+Question sets: `basic` (simple lookups and refusals) and `hard` (multi-step logic,
+relative dates, accented and shared names, streaks). The correct answers for `hard`,
+worked out from the local database, are next to each question.
 
 The API key is read from GEMINI_API_KEY and sent in a header (never in the URL), so it
 doesn't end up in logs or error messages.
 
 Usage:
     uv run --env-file .env spikes/gemini_free_tier.py probe
-    uv run --env-file .env spikes/gemini_free_tier.py format gemini-3.5-flash [model ...]
+    uv run --env-file .env spikes/gemini_free_tier.py format basic|hard <model> [model ...]
 
-Saves raw results to spikes/output/gemini_<part>.json.
+Saves raw results to spikes/output/gemini_<part>.json (gemini_format_<set>.json).
 """
 
 import json
@@ -29,6 +35,7 @@ import time
 from datetime import date
 from pathlib import Path
 
+import psycopg
 import requests
 import sqlglot
 
@@ -62,7 +69,7 @@ REPLY_SCHEMA = {
 }
 
 # (question, should it be answerable?)
-QUESTIONS = [
+BASIC = [
     ("Who scored the most points in a single game in 2025-26?", True),
     ("How many triple-doubles did Nikola Jokic have in the 2024-25 regular season?", True),
     ("Which player has the most career playoff points?", True),
@@ -75,6 +82,53 @@ QUESTIONS = [
     ("Top 5 players by 3-pointers made in the 2026 NBA Cup final?", True),
 ]
 
+# All answerable. The comment is the correct answer from the local DB on 2026-11-23.
+HARD = [
+    # Luka Dončić 33.5 (64 games); a plain "highest average" without the filter differs
+    (
+        "Who averaged the most points per game in the 2025-26 regular season, "
+        "among players who played at least 58 games?",
+        True,
+    ),
+    # Wilt Chamberlain 284, Michael Jordan 211, Kobe Bryant 135
+    ("Who has the most career 40-point games, counting regular season and playoffs?", True),
+    # 11 (the stored name is "Luka Dončić", with accents)
+    ("How many 50-point games has Luka Doncic had in the regular season?", True),
+    # Boston Celtics 18, Los Angeles Lakers 16 (the 1954 title is missing: that playoff
+    # began with a round robin, so it has no series)
+    ("Which franchise has won the most championships?", True),
+    # Cooper Flagg, 42 points on 2025-12-15, aged 18 years 11 months
+    ("Who is the youngest player to score 40 points in a game?", True),
+    # LeBron James 11, Magic Johnson 8, Draymond Green 3
+    ("Which players have the most triple-doubles in NBA Finals games?", True),
+    # 650 of 1,637 = 39.7% (summed, not an average of per-season percentages)
+    ("What is Stephen Curry's career three-point percentage in the playoffs?", True),
+    # 1961-62 118.8, 1960-61 118.1, 1966-67 117.4
+    ("Which regular season had the highest average points per team per game?", True),
+    # Devin Booker 70 (2017-03-24), Elgin Baylor 64, Michael Jordan 63
+    ("Who scored the most points against the Boston Celtics in a single game?", True),
+    # Wilt Chamberlain 65 (1961-11-04 to 1962-02-22), James Harden 32
+    (
+        "What is the longest streak of consecutive regular-season games with 30 or more "
+        "points by one player?",
+        True,
+    ),
+    # 1 game, won it (team minutes over 240 = overtime)
+    (
+        "How many overtime games did the Lakers play last regular season, "
+        "and what was their record in them?",
+        True,
+    ),
+    # LeBron James 43,628 (2003), Kareem Abdul-Jabbar 38,387, Shaquille O'Neal 28,596
+    ("Which number one overall draft pick has scored the most career regular-season points?", True),
+    # Derek Fisher 161, Tim Duncan 157
+    ("Who has more career playoff wins, Tim Duncan or Derek Fisher?", True),
+    # Two players: 19,182 (1981-82 to 1998-99) and 10,137 (1977-78 to 1986-87)
+    ("How many career regular-season points did Eddie Johnson score?", True),
+]
+
+QUESTION_SETS = {"basic": BASIC, "hard": HARD}
+
 
 def key() -> str:
     k = os.environ.get("GEMINI_API_KEY")
@@ -83,7 +137,7 @@ def key() -> str:
     return k
 
 
-def generate(model: str, body: dict) -> tuple[int, dict, float]:
+def generate(model: str, body: dict, timeout: int = 60) -> tuple[int, dict, float]:
     """POST one request. A timeout comes back as status 0 rather than stopping the run."""
     started = time.perf_counter()
     try:
@@ -91,10 +145,11 @@ def generate(model: str, body: dict) -> tuple[int, dict, float]:
             f"{API}/models/{model}:generateContent",
             headers={"x-goog-api-key": key(), "Content-Type": "application/json"},
             json=body,
-            timeout=60,
+            timeout=timeout,
         )
     except requests.Timeout:
-        return 0, {"error": {"message": "timed out after 60 s"}}, time.perf_counter() - started
+        message = f"timed out after {timeout} s"
+        return 0, {"error": {"message": message}}, time.perf_counter() - started
     return resp.status_code, resp.json(), time.perf_counter() - started
 
 
@@ -144,10 +199,11 @@ Database description:
 {schema_doc}"""
 
 
-def format_test(models: list[str]) -> None:
+def format_test(question_set: str, models: list[str]) -> None:
     system = system_prompt()
+    db_url = os.environ.get("DATABASE_URL")
     results = []
-    for question, expected in QUESTIONS:
+    for question, expected in QUESTION_SETS[question_set]:
         for model in models:
             body = {
                 "systemInstruction": {"parts": [{"text": system}]},
@@ -158,7 +214,7 @@ def format_test(models: list[str]) -> None:
                     "temperature": 0,
                 },
             }
-            status, data, secs = generate(model, body)
+            status, data, secs = generate(model, body, timeout=120)
             row = {"model": model, "question": question, "status": status, "seconds": secs}
             if status != 200:
                 row["error"] = data.get("error", {}).get("message", "")[:300]
@@ -170,6 +226,8 @@ def format_test(models: list[str]) -> None:
             row["raw"] = text
             row["usage"] = data.get("usageMetadata")
             row["problems"] = check_reply(text, expected)
+            if db_url and not row["problems"]:
+                row["rows"] = run_read_only(db_url, json.loads(text)["sql"])
             results.append(row)
             u = row["usage"] or {}
             print(
@@ -178,7 +236,7 @@ def format_test(models: list[str]) -> None:
                 f"{'OK ' if not row['problems'] else 'BAD'} {question[:45]}  {row['problems']}"
             )
             time.sleep(5)
-    save("format", results)
+    save(f"format_{question_set}", results)
     for model in models:
         rows = [r for r in results if r["model"] == model and r["status"] == 200]
         bad = [r for r in rows if r["problems"]]
@@ -211,6 +269,27 @@ def check_reply(text: str, expected: bool) -> list[str]:
     return problems
 
 
+def run_read_only(db_url: str, sql: str) -> list | str:
+    """First 5 rows of an AI-written query, in a read-only transaction with a time limit.
+
+    Spike only: connects as whoever DATABASE_URL names. The app proper runs AI SQL
+    through query/run.py as a read-only user, after the safety checker.
+    """
+    if not sql.strip():
+        return []
+    try:
+        with psycopg.connect(db_url) as conn, conn.cursor() as cur:
+            cur.execute("SET TRANSACTION READ ONLY")
+            cur.execute("SET LOCAL statement_timeout = '10s'")
+            cur.execute("SET LOCAL search_path = nba")
+            cur.execute(sql)
+            rows = cur.fetchmany(5)
+            conn.rollback()
+            return [[str(v) for v in r] for r in rows]
+    except psycopg.Error as e:
+        return f"error: {str(e).splitlines()[0]}"
+
+
 def save(part: str, results: list) -> None:
     OUTPUT_DIR.mkdir(exist_ok=True)
     path = OUTPUT_DIR / f"gemini_{part}.json"
@@ -221,8 +300,8 @@ def save(part: str, results: list) -> None:
 def main() -> None:
     if len(sys.argv) >= 2 and sys.argv[1] == "probe":
         probe()
-    elif len(sys.argv) >= 3 and sys.argv[1] == "format":
-        format_test(sys.argv[2:])
+    elif len(sys.argv) >= 4 and sys.argv[1] == "format" and sys.argv[2] in QUESTION_SETS:
+        format_test(sys.argv[2], sys.argv[3:])
     else:
         sys.exit(__doc__)
 

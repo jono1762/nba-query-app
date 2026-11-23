@@ -341,7 +341,7 @@ type.
 
 ## Gemini models and the reply format (2026-11-23)
 
-Script: `spikes/gemini_free_tier.py` (`probe`, then `format <model> ...`).
+Script: `spikes/gemini_free_tier.py` (`probe`, then `format basic|hard <model> ...`).
 
 - **Which models a free key can use.** One tiny request each:
   - Answered: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`,
@@ -377,6 +377,30 @@ Script: `spikes/gemini_free_tier.py` (`probe`, then `format <model> ...`).
   input tokens per question with `docs/SCHEMA.md` as the table description.
 - **Overload errors (503) and timeouts happen** on every model at times, so a
   retry, and falling back to a second model, is needed (step 13).
+- **Harder questions** (`format hard`: 14 multi-step questions, correct answers
+  worked out from the database first and kept next to each question in the script):
+  - `gemini-3.1-flash-lite`: **13 of 14 right**, 2-4 s each, no errors. It got the
+    games-played filter, career 40-point games across season types, the youngest
+    40-point scorer (by age on game day), Finals triple-doubles, Curry's playoff
+    3-point % (summed, not averaged), the highest-scoring season, the most points
+    against the Celtics, Wilt's 65-game streak of 30-point games (a gaps-and-islands
+    query), the Lakers' overtime record "last season", the top No. 1 pick, Fisher vs
+    Duncan, and both Eddie Johnsons.
+  - The miss: "Luka Doncic" without accents returned 0 (really 11). **Every model
+    made it, full Flash included**, so the player-name lookup is required, not
+    optional.
+  - Several queries returned only a name (e.g. `Cooper Flagg`) without the value
+    that answers the question (age, points). The instructions should ask for the
+    figures too, so the answer step can quote them.
+  - `gemini-3.5-flash-lite`: 10 of 12 answered right; it called a 577-game career
+    span a "streak", refused Eddie Johnson as ambiguous, and had two 503s.
+  - `gemini-3-flash-preview`: right on all 6 it answered, but 8 of 14 took longer
+    than 120 seconds.
+  - `gemini-3.6-flash` hit "exceeded your current quota" (429) after its 12th
+    request of the day, so its free daily limit is lower than the 20 reported.
+  - The 1954 Lakers title was missing from the data (the 1953-54 playoffs had no
+    rounds), so "most championships" gave the Lakers 16, not 17. Fixed on its own
+    branch (`fix/1954-playoffs`).
 - **Decision: start with `gemini-3.1-flash-lite`**, as one setting so it's easy to
   change. Move to a stronger model only if the accuracy test (step 14) shows it
   isn't good enough.
