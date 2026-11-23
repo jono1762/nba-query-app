@@ -47,6 +47,19 @@ The data-quality report flags impossible or suspicious data
 (e.g. a team whose player minutes don't add up) for a person to look at; it never
 blocks a load.
 
+## Asking questions
+
+From the command line, against the real AI and the local database. Needs
+`GEMINI_API_KEY` and `READER_DATABASE_URL` in `.env`. Each question uses up to two
+AI calls from the Gemini free allowance.
+
+```bash
+uv run --env-file .env python -m nba_query_app.ask "Who scored the most points in 2025-26?"
+```
+
+It prints the answer, then the SQL the AI wrote, the result rows, and the AI calls
+and tokens used.
+
 ## Database
 
 - `migrations/` holds numbered SQL files, applied in order, once each.
@@ -78,7 +91,8 @@ src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data
                      quality.py: data-quality checks,
                      query/: SQL safety checker, read-only query runner, the AI's
                      instructions and player-name lookup,
-                     llm/: AI model interface and Gemini client)
+                     llm/: AI model interface and Gemini client,
+                     ask.py: ask a question from the command line)
 migrations/          database schema changes (numbered SQL files)
 tests/               automated tests
 docs/PLAN.md         the build plan, decisions and progress

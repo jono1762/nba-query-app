@@ -41,6 +41,7 @@ uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated
 uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
 uv run --env-file .env python -m nba_query_app.ingest.player_details   # player details only (first run ~2 h for birth dates)
 uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
+uv run --env-file .env python -m nba_query_app.ask "question"   # ask the real AI (up to 2 calls from the free allowance)
 ```
 
 The backfill makes real requests to stats.nba.com (about 340 for the full history, two per season and season type, roughly 10 minutes). Run it only when data is actually needed.
@@ -110,6 +111,16 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
 - Intervals (e.g. `age(game_date, birth_date)`) come back as Postgres's text, `'18 years 11 mons 25 days'`, not a Python timedelta, which counts only days.
 - A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.
+
+**Answering a question** (`query/ask.py`). `Answerer.ask(question) -> Answer` is the interface the rest of the app uses; `Answer` holds the status (`answered`, `refused` or `failed`), the text (the answer, the refusal reason, or what went wrong), the SQL, columns, rows, `truncated`, the model, the number of AI calls, summed `Usage` and seconds. `TwoStepAnswerer(llm, conn)` is the base strategy:
+1. find the players named (`players.py`) and build the instructions (`prompt.py`) with today's date, the season and the newest game;
+2. AI call 1 returns `{answerable, reason, sql}`; not answerable means status `refused`;
+3. `run_query` safety-checks and runs the SQL read-only;
+4. AI call 2 phrases the answer from the rows only.
+- Failures (AI unreachable, a reply in the wrong shape, unsafe SQL, a database error or timeout) come back as status `failed`, not exceptions, so the calls and tokens used are still known. The rows are kept if only the second call failed. Retries are step 13.
+- `conn` must be a read-only user's connection with no open transaction; the CLI connects with autocommit. The instructions and the player-name list are read from the database once per `TwoStepAnswerer`.
+- Questions are whitespace-collapsed; empty ones or ones over 500 characters fail without an AI call.
+- `nba_query_app/ask.py` is the command-line version (`format_answer` prints the result).
 
 **The AI's instructions** (`query/prompt.py`, `query/players.py`).
 - Writing SQL: `sql_instructions(describe_schema(conn))` is the system prompt: rules, basketball definitions and three worked examples (written in `prompt.py`), then every `ALLOWED_TABLES` table and column with its COMMENT, read from the database, then `nba.stat_tracked_since` (when each stat was recorded, so early-season questions are refused without a query). `sql_request(question, QuestionContext)` adds today's date, the current season, `meta.latest_game_date` and the players named in the question. The reply follows `SQL_REPLY_SCHEMA`: `{answerable, reason, sql}`.
