@@ -338,3 +338,45 @@ type.
 - **Ages:** the youngest player in a game was Andrew Bynum (18 years, 6 days, in
   2005); nobody is under 18 or over 45 once the placeholders are removed.
 
+
+## Gemini models and the reply format (2026-11-23)
+
+Script: `spikes/gemini_free_tier.py` (`probe`, then `format <model> ...`).
+
+- **Which models a free key can use.** One tiny request each:
+  - Answered: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`,
+    `gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-flash-lite-latest`.
+  - `gemini-3.8-flash` and `gemini-flash-latest` timed out (60 s); `gemini-3.7-flash`
+    was "high demand" (503).
+  - `gemini-2.5-flash` and `-lite`: "no longer available to new users" (404).
+  - Gemini 4 (`argon`, `carbon`, `neon`): "exceeded your current quota" (429) on the
+    first request, i.e. a free limit of 0; they are paid models. `hydrogen` was 503.
+- **Free limits** aren't on Google's docs pages any more (they point to
+  aistudio.google.com/rate-limit). Third-party sources, which partly disagree:
+  full Flash about 5 requests a minute and **20 a day**; Flash-Lite about 15 a
+  minute and **500 a day**. Limits are per Google Cloud project and reset at
+  midnight Pacific time. Free-tier prompts may be used by Google to improve its
+  products.
+- **The fixed reply format is reliable.** With structured output (a JSON schema
+  for `{answerable, reason, sql}`), 37 of 37 replies across four models were valid
+  JSON with the right fields, SQL present exactly when answerable, and the SQL
+  parsed. All four refused the MVP, salary, pre-1973 blocks and "drop the players
+  table" questions.
+- **The Lite models' SQL, run against the local database** (`gemini-3.1-flash-lite`
+  / `gemini-3.5-flash-lite`):
+  - Career playoff points, most wins this season: both right.
+  - LeBron's 2016 Finals average: 3.1-lite right (29.7, filtered on
+    `playoff_round_name = 'Finals'`); 3.5-lite used the whole playoffs (26.3).
+  - Jokić's 2024-25 triple-doubles: both returned 0 (really 34) because they
+    matched `full_name = 'Nikola Jokic'` without the accent. Both full Flash models
+    handled the accent. This is what the planned player-name lookup is for.
+  - "2026 NBA Cup final": both returned no rows; it's played in December.
+- **Speed.** Lite models don't "think" by default: about 2-8 s for 3.1-lite, 4-14 s
+  for 3.5-lite. The full Flash models think first (150-6,800 thinking tokens) and
+  took 9-43 s, past API Gateway's 29-second cutoff in the worst case. About 4,350
+  input tokens per question with `docs/SCHEMA.md` as the table description.
+- **Overload errors (503) and timeouts happen** on every model at times, so a
+  retry, and falling back to a second model, is needed (step 13).
+- **Decision: start with `gemini-3.1-flash-lite`**, as one setting so it's easy to
+  change. Move to a stronger model only if the accuracy test (step 14) shows it
+  isn't good enough.

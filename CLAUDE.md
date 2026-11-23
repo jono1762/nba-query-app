@@ -46,7 +46,7 @@ The backfill makes real requests to stats.nba.com (about 340 for the full histor
 
 Without `DATABASE_URL`, database tests are **skipped**. With `REQUIRE_DATABASE=1` (set in CI) they **fail** instead.
 
-Spike scripts declare their own dependencies inline and run in isolation: `uv run spikes/stats_nba_gamelog.py [season]`.
+Spike scripts declare their own dependencies inline and run in isolation: `uv run spikes/stats_nba_gamelog.py [season]`, `uv run --env-file .env spikes/gemini_free_tier.py probe|format <model>...`.
 
 ## Architecture
 
