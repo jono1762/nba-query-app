@@ -110,6 +110,11 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
 - A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.
 
+**AI model client** (`llm/`). `client.py` defines what callers need from a model: `LlmClient.generate(system=, prompt=, json_schema=)` returns an `LlmReply` (text, model, `Usage` in input/output/thinking tokens, seconds). Callers take an `LlmClient`, so tests pass a fake and never call the real model. `gemini.py` is the Gemini version over the REST API (no SDK, to keep the Lambda package small).
+- The model is a setting: `GEMINI_MODEL`, default `gemini-3.1-flash-lite`, the cheapest model that did the job in testing (see `spikes/FINDINGS.md`). The key comes from `GEMINI_API_KEY`, is sent in a header, never in the URL, and never appears in error messages.
+- With `json_schema`, Gemini's structured output forces the reply into that JSON shape. Temperature is 0.
+- Errors: `LlmQuotaError` (429, free allowance used up), `LlmUnavailableError` (overloaded, timed out or unreachable; worth retrying), otherwise `LlmError` (including a blocked reply or one cut off before `STOP`). The timeout is 20 s, since API Gateway cuts requests off at 29 s.
+
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 
 **Roles** (`002_create_roles.sql`) are NOLOGIN groups. Each environment creates its own login users, so no passwords live in migrations.
