@@ -15,9 +15,9 @@ Built so far:
 - player details (`nba.player_details`: position, height, weight, birth date, college, country, draft)
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
+- SQL safety checker, and a runner that runs checked SQL as the read-only user
 
 Not built yet:
-- SQL safety checker
 - LLM pipeline and accuracy eval
 - API and frontend
 - AWS deploy
@@ -102,6 +102,12 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Tables: only `ALLOWED_TABLES` in the `nba` schema, bare or `nba.`-qualified. WITH names may not start with `pg_`, because Postgres searches `pg_catalog` first, so a `pg_` name outside the WITH's scope would reach a system table. **A new table or view must be added to `ALLOWED_TABLES`**; a test compares it with the database.
 - Functions: sqlglot gives known functions their own node class (`ALLOWED_FUNCTION_TYPES`; note that AND, OR, CASE branches, `~` and `~*` are function nodes too) and the rest `exp.Anonymous` (`ALLOWED_FUNCTION_NAMES`). Schema-qualified calls and `reg*` casts are refused. sqlglot renames some functions (`to_char` is `TimeToStr`, `string_agg` is `GroupConcat`), so check the node class with `sqlglot.parse_one(sql, read="postgres")` before adding one.
 - Brackets nested more than about 45 deep hit Python's recursion limit inside sqlglot; that's refused as "nested too deeply".
+
+**Running AI-written SQL** (`query/run.py`): `run_query(conn, sql)` checks the SQL, then `run_read_only` runs it with Postgres's own guards, which hold even if the checker misses something. Tests call `run_read_only` directly to prove that.
+- It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that means AI-written SQL needs a login user in `nba_reader`.
+- One transaction: `SET TRANSACTION READ ONLY`, then `statement_timeout` (5 s by default) and `search_path = nba` as `SET LOCAL`, which end with the transaction, so the connection can be reused. The connection must not already be in a transaction.
+- The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
+- A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 

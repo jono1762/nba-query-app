@@ -55,7 +55,7 @@ REALISTIC = [
     "POSITION('a' IN full_name), LEFT(full_name, 1), INITCAP(full_name) FROM nba.players "
     "WHERE full_name ILIKE '%james%' OR full_name ~* '^lebron' OR full_name LIKE 'L%'",
     # Sets, subqueries, ANY, EXISTS
-    "SELECT * FROM nba.playoff_series WHERE season = '2015-16' AND round_name = 'Finals' "
+    "SELECT * FROM nba.playoff_series WHERE season = '2015-16' AND playoff_round_name = 'Finals' "
     "UNION ALL SELECT * FROM nba.playoff_series WHERE EXISTS (SELECT 1 FROM nba.games) "
     "AND season = ANY(ARRAY['2014-15', '2016-17']) "
     "AND winner_team_id NOT IN (SELECT team_id FROM nba.teams WHERE abbreviation = 'GSW')",
