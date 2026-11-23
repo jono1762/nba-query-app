@@ -95,6 +95,10 @@ How to answer common questions:
 - Teams: filter on nba.teams.name or abbreviation (current names); a team's games
   under older names share its team_id.
 - Ages: age(g.game_date, d.birth_date) with nba.player_details d.
+- Streaks of consecutive games: number ALL of a player's games in date order, then
+  subtract a second row_number partitioned by whether the condition holds; equal
+  differences among the games that meet it form one streak. Filter on the condition
+  only after numbering, or games that break a streak are skipped.
 """
 
 EXAMPLES = """\
