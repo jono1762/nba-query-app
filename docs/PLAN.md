@@ -170,12 +170,18 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 - Decided: start with the cheapest model that does the job, **`gemini-3.1-flash-lite`** (free: about 500 requests a day, replies in 2-8 seconds), and move up only if the accuracy test shows it isn't good enough. The full Flash models allow only about 20 requests a day on the free tier and take 9-43 seconds, and the Gemini 4 models aren't free at all. Details in `spikes/FINDINGS.md`.
 - Decided: Gemini's "structured output" (a JSON format the reply must follow) gives the fixed reply format; every test reply came back valid.
 - Decided: the AI is told about the tables from the database's own column descriptions (read when the app starts), so they can't drift from the real tables, plus hand-written rules, basketball definitions and three worked examples, and when each stat was first recorded.
-- Decided: player names in the question are looked up first, ignoring accents ("Doncic" finds "Dončić"), and the AI is given their exact IDs. Every model tested, the expensive ones too, missed accented names without this.
+- Decided: player names in the question are looked up first, ignoring accents ("Doncic" finds "Dončić"), and the AI is given their exact IDs. Every model tested, the expensive ones too, missed accented names without this. Names the lookup misses are handled in step 13.
 - **Base case:** the AI writes the SQL, our code safety-checks and runs it, and a second AI call phrases the answer from the result rows (see "What happens when someone asks a question").
 - Build it behind a small interface (question in, answer, rows, SQL and usage out), so a different strategy can replace it without touching the rest.
 - **Not now: an "agent" loop**, where the AI gets a `run_sql` tool and can query several times before answering. It handles multi-step questions better, but multiplies AI calls on a free tier that's already the tightest limit. Revisit only if the accuracy test shows the base case failing on multi-step questions; the interface above makes it a drop-in change (capped at about 4 tool calls and 20 seconds, since API Gateway cuts requests off at 29 seconds).
 
-**13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Gemini often answers "high demand" (503) or doesn't reply in time, on every model (about 1 call in 10 in testing), so retry with a short wait and fall back to a second free model (`gemini-3.5-flash-lite`). Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+**13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost.
+- Gemini often answers "high demand" (503) or doesn't reply in time, on every model (about 1 call in 10 in testing), so retry with a short wait and fall back to a second free model (`gemini-3.5-flash-lite`).
+- Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+- Player names the lookup (step 12) doesn't recognise: nicknames ("Shaq"), misspellings ("Luka Donkic"), lowercase last names ("doncic").
+  - The AI works out who is meant and searches with accents ignored: `unaccent(full_name) ILIKE 'luka doncic'`. It can't be told to write the accents itself, because the source's spelling isn't consistent ("Luka Dončić" but "Goran Dragic").
+  - Needs a migration adding Postgres's `unaccent` extension, installed in the `nba` schema (AI queries search only there, and the safety checker refuses schema-qualified calls), with `unaccent` added to the checker's allowed functions and the instructions updated.
+  - The lookup stays for names it does recognise: it's exact, testable without the AI, and gives both IDs when two players share a name.
 
 **14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
