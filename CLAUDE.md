@@ -16,9 +16,11 @@ Built so far:
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
 - SQL safety checker, and a runner that runs checked SQL as the read-only user
+- Gemini client, AI instructions, and the two-call flow that answers a question, with a command-line version
 
 Not built yet:
-- LLM pipeline and accuracy eval
+- retries, refusals and cost logging (step 13)
+- accuracy eval
 - API and frontend
 - AWS deploy
 
