@@ -417,9 +417,9 @@ Script: `spikes/gemini_free_tier.py` (`probe`, then `format basic|hard <model> .
   - Several queries returned only a name (e.g. `Cooper Flagg`) without the value
     that answers the question (age, points). The instructions now ask for the
     figures too, so the answer step can quote them.
-  - The 1954 Lakers title was missing from the data (the 1953-54 playoffs had no
-    rounds), so "most championships" gave the Lakers 16, not 17. Fixed on its own
-    branch (`fix/1954-playoffs`).
+  - "Most championships" showed that the 1954 Lakers title was missing from the
+    data (the Lakers had 16, not 17). Now fixed: see the 1953-54 round robin under
+    playoff rounds above.
 - **Through the real flow** (`python -m nba_query_app.ask`, with the name lookup and
   the instructions in `query/prompt.py`), all 24 questions on `gemini-3.1-flash-lite`:
   22 of the 23 that completed were right, including Luka Dončić's 11 50-point games

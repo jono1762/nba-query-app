@@ -95,8 +95,7 @@ HARD = [
     ("Who has the most career 40-point games, counting regular season and playoffs?", True),
     # 11 (the stored name is "Luka Dončić", with accents)
     ("How many 50-point games has Luka Doncic had in the regular season?", True),
-    # Boston Celtics 18, Los Angeles Lakers 16 (the 1954 title is missing: that playoff
-    # began with a round robin, so it has no series)
+    # Boston Celtics 18, Los Angeles Lakers 17
     ("Which franchise has won the most championships?", True),
     # Cooper Flagg, 42 points on 2025-12-15, aged 18 years 11 months
     ("Who is the youngest player to score 40 points in a game?", True),
