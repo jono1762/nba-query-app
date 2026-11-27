@@ -91,7 +91,7 @@ src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data
                      quality.py: data-quality checks,
                      names.py: player names stored without accents,
                      query/: SQL safety checker, read-only query runner, the AI's
-                     instructions and player-name lookup,
+                     instructions and the question-answering flow,
                      llm/: AI model interface and Gemini client,
                      ask.py: ask a question from the command line)
 migrations/          database schema changes (numbered SQL files)

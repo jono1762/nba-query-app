@@ -2,8 +2,8 @@
 
 Nobody types accents in a question, and the source isn't consistent anyway (it has
 "Luka Dončić" but "Goran Dragic"), so a name written the way people type it should
-match the stored one. The loader (ingest/normalize.py) and the name lookup
-(query/players.py) both use `strip_accents`, so they always agree.
+match the stored one. The loader (ingest/normalize.py) uses `strip_accents` on every
+name it saves.
 Migration 019 did the same to the names already stored, and a CHECK constraint
 keeps nba.players.full_name to plain ASCII characters.
 """
