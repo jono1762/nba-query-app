@@ -104,7 +104,7 @@ Every player who has appeared in a game.
 | Column | Meaning |
 |---|---|
 | `player_id` | NBA.com player ID. The key. |
-| `full_name` | Full name as NBA.com lists it, e.g. `LeBron James`. Two players can share a name (there are two Eddie Johnsons). |
+| `full_name` | Full name as NBA.com lists it, but without accents: `Luka Doncic`, not `Luka Dončić`, since nobody types them (a CHECK allows plain ASCII characters only). Two players can share a name (there are two Eddie Johnsons). |
 | `name_as_of` | Bookkeeping for the loader: the date of the latest game the name was taken from. |
 
 ### `nba.player_details`

@@ -182,6 +182,13 @@ def set_wl_for_team(response: dict, game_id: str, team_id: int, value) -> None:
             row[headers.index("WL")] = value
 
 
+def test_player_names_are_stored_without_accents(response: dict) -> None:
+    # The fixture's real rows include "Hugo González".
+    names = {p.full_name for p in normalize_without_team_rows(response).players}
+    assert "Hugo Gonzalez" in names
+    assert all(name.isascii() for name in names)
+
+
 def test_missing_win_loss_on_one_player_comes_from_teammates(response: dict) -> None:
     # Real example: 1959-60 box scores with W/L missing on single player rows.
     set_column(response, "WL", None)  # row 0 is a PHI player; PHI won

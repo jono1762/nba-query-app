@@ -18,7 +18,8 @@ makes (impossible, but present in old box scores) is treated as not recorded,
 a W/L missing from a single player row is filled in from the teammates, and
 ghost copies of a player listed on both teams in one game are removed. Each
 time one of these cleanup rules fires it is counted (`Batch.cleanups`), so the
-totals can be reported.
+totals can be reported. Player names are stored without accents ("Luka Doncic",
+see names.py); that's a format choice rather than a correction, so not counted.
 
 This module does no network or database work, so it is easy to test.
 """
@@ -29,6 +30,7 @@ from datetime import date
 from typing import Any
 
 from nba_query_app.ingest.playoffs import PlayoffGame, playoff_rounds
+from nba_query_app.names import strip_accents
 
 # SEASON_ID looks like '22026': the first digit is the season type, the rest the start year.
 SEASON_TYPE_BY_PREFIX = {
@@ -261,9 +263,8 @@ def normalize_league_game_log(response: dict[str, Any], team_response: dict[str,
         _keep_latest(
             teams, team_id, Team(team_id, row["TEAM_ABBREVIATION"], row["TEAM_NAME"], game_date)
         )
-        _keep_latest(
-            players, row["PLAYER_ID"], Player(row["PLAYER_ID"], row["PLAYER_NAME"], game_date)
-        )
+        name = strip_accents(row["PLAYER_NAME"])  # "Luka Doncic", see names.py
+        _keep_latest(players, row["PLAYER_ID"], Player(row["PLAYER_ID"], name, game_date))
 
         game = Game(
             game_id=game_id,

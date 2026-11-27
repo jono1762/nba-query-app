@@ -5,8 +5,8 @@ from conftest import NbaData
 from nba_query_app.query.players import PlayerMatch, PlayerNames, normalize, with_seasons
 
 PLAYERS = [
-    (203999, "Nikola Jokić"),
-    (1629029, "Luka Dončić"),
+    (203999, "Nikola Jokic"),
+    (1629029, "Luka Doncic"),
     (2544, "LeBron James"),
     (201935, "James Harden"),
     (698, "Eddie Johnson"),
@@ -31,8 +31,9 @@ def test_normalize_drops_accents_case_and_punctuation() -> None:
     assert normalize("Dončić O'Neal Abdul-Jabbar") == ["doncic", "oneal", "abdul", "jabbar"]
 
 
-def test_full_name_without_accents() -> None:
-    assert found("How many 50-point games has Luka Doncic had?") == [("Luka Doncic", 1629029)]
+def test_accents_typed_in_the_question_are_ignored() -> None:
+    # Stored names have no accents (names.py); someone may still type them.
+    assert found("How many 50-point games has Luka Dončić had?") == [("Luka Dončić", 1629029)]
 
 
 def test_lowercase_and_punctuation_in_the_question() -> None:
@@ -80,7 +81,7 @@ def test_no_players() -> None:
 
 
 def test_load_and_seasons_from_the_database(nba_data: NbaData) -> None:
-    nba_data.player(203999, "Nikola Jokić")
+    nba_data.player(203999, "Nikola Jokic")
     nba_data.game("g1", "2015-16")
     nba_data.game("g2", "2024-25")
     nba_data.stats("g1", 203999, 1, won=True)
@@ -89,5 +90,5 @@ def test_load_and_seasons_from_the_database(nba_data: NbaData) -> None:
     matches = PlayerNames.load(nba_data.conn).find("Nikola Jokic")
 
     assert with_seasons(nba_data.conn, matches) == [
-        PlayerMatch("Nikola Jokic", 203999, "Nikola Jokić", "2015-16", "2024-25")
+        PlayerMatch("Nikola Jokic", 203999, "Nikola Jokic", "2015-16", "2024-25")
     ]

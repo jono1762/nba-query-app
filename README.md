@@ -89,6 +89,7 @@ and tokens used.
 ```
 src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading,
                      quality.py: data-quality checks,
+                     names.py: player names stored without accents,
                      query/: SQL safety checker, read-only query runner, the AI's
                      instructions and player-name lookup,
                      llm/: AI model interface and Gemini client,

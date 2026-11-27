@@ -1,10 +1,11 @@
 """Find the players a question names, so the AI is told their exact IDs.
 
-Without this the AI guesses at names: in testing, most models searched for
-full_name = 'Luka Doncic' and found nothing, because the database has 'Luka Dončić'.
-So before asking the AI, the question is matched against every player's name,
-ignoring accents, case and punctuation, and the matches (with player_id and the
-seasons they played) go into the prompt. A name shared by several players (there
+The AI can't see the stored names, so without this it guesses how a name is
+stored, and guesses wrong for players it doesn't know (new players) or names typed
+in lowercase. So before asking the AI, the question is matched against every
+player's name, ignoring case, punctuation and any accents typed (stored names have
+none, see names.py), and the matches (with player_id and the seasons they played)
+go into the prompt. A name shared by several players (there
 are two Eddie Johnsons) returns all of them, so the AI can cover each or say which.
 
 Matching:
@@ -13,14 +14,15 @@ Matching:
   most MAX_SURNAME_MATCHES players have it, so "James" alone doesn't list dozens,
   and if it isn't part of a team name ("Boston Celtics" isn't Brandon Boston).
 Nicknames ("Shaq") aren't matched; the AI knows those well enough to write the
-full name, and they have no accents to get wrong.
+full name.
 """
 
 import re
-import unicodedata
 from dataclasses import dataclass
 
 import psycopg
+
+from nba_query_app.names import strip_accents
 
 # A last name on its own is used only if this few players have it.
 MAX_SURNAME_MATCHES = 5
@@ -38,9 +40,7 @@ class PlayerMatch:
 def normalize(text: str) -> list[str]:
     """Lowercase words, accents and punctuation removed, apostrophes closed up:
     "Dončić O'Neal Abdul-Jabbar" -> ['doncic', 'oneal', 'abdul', 'jabbar']."""
-    decomposed = unicodedata.normalize("NFKD", text)
-    plain = "".join(c for c in decomposed if not unicodedata.combining(c))
-    plain = re.sub(r"['’]", "", plain.lower())
+    plain = re.sub(r"'", "", strip_accents(text).lower())
     return re.sub(r"[^a-z0-9]+", " ", plain).split()
 
 

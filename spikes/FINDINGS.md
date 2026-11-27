@@ -475,6 +475,28 @@ were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124
   probably invites that.
 - The misses on the other questions were SQL mistakes (a wrong column) and the
   Fisher vs Duncan refusal, in every version.
-- Not tested yet: a rookie the model has never heard of, asked about by last name
-  alone. Without a first name `ILIKE unaccent('Dybantsa')` finds nothing, which the
-  lookup handles.
+- **Rookies the model has never heard of** (2026-11-27, `gemini-3.1-flash-lite`, 15
+  questions about players drafted in June 2026, mostly by last name alone; results in
+  `spikes/output/gemini_rookies_20261127.json`): the lookup 14 right, `unaccent` as
+  above 6, `unaccent` plus "if you don't know the player, match part of the name"
+  11. The AI rarely notices it doesn't know a player: for "Demin" (Egor Dëmin) and
+  "Lendeborg" it searched for the word as the whole name (`ILIKE 'Demin'`), which
+  matches nobody. For "Mara" it searched `'%Mara%'` and also got Toumani Camara.
+  The one lookup miss, the misspelt "Dybanza", failed in every version. The lookup
+  missed "Acuff" (it took "Jr." for the last name), but the AI searched `'%Acuff%'`
+  on its own.
+- **Lookup plus fallback** (2026-11-27, same model; results in
+  `spikes/output/gemini_names_layered_20261127.json`): the lookup, a "names that
+  match many players" note for common last names, and a fallback column of names
+  without accents. Rookies 13 of 15, accents, nicknames and shared names all right,
+  "How many points has LeBron scored?" right (43,628; without the change it added
+  the playoffs in, 52,248). But the AI refused "James", "Davis" and even "Peterson
+  this season" as ambiguous, ignored the plain-name column for "doncic" and "jokic",
+  and for "Dybanza" made up a player_id that doesn't exist.
+- **The lesson: the AI can't see the stored names, so it can only guess how one is
+  stored.** Even the best model guesses wrong for players it doesn't know, and this
+  one doesn't reliably follow rules about when to search loosely.
+- **Decision (2026-11-27): player names are stored without accents** ("Luka
+  Doncic"; `nba_query_app/names.py`, migration 019). Nobody types accents and the
+  source isn't consistent ("Goran Dragic"), so accents stop being a problem anywhere.
+  The rest of the matching strategy is in `docs/PLAN.md` step 13.

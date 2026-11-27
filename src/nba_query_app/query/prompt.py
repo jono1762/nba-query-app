@@ -70,10 +70,10 @@ The query:
 GUIDANCE = """\
 How to answer common questions:
 - Players named in the question are listed with their player_id under "Players
-  named in the question". Filter on player_id, not on full_name: names have accents
-  (Luka Dončić, Nikola Jokić). If a name matches several players and the question
-  doesn't say which, include every one and return full_name and seasons so the user
-  can tell them apart.
+  named in the question". Filter on player_id, not on full_name: the question may
+  spell the name differently from the database. If a name matches several players
+  and the question doesn't say which, include every one and return full_name and
+  seasons so the user can tell them apart.
 - Season labels look like '2015-16'. "The 2016 Finals" or "the 2016 playoffs" is
   season '2015-16'; "the 2023-24 season" is '2023-24'; "this season" is the current
   season; "last season" is the one before it.

@@ -170,7 +170,8 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 - Decided: start with the cheapest model that does the job, **`gemini-3.1-flash-lite`** (free: about 500 requests a day, replies in 2-8 seconds), and move up only if the accuracy test shows it isn't good enough. The full Flash models allow only about 20 requests a day on the free tier and take 9-43 seconds, and the Gemini 4 models aren't free at all. Details in `spikes/FINDINGS.md`.
 - Decided: Gemini's "structured output" (a JSON format the reply must follow) gives the fixed reply format; every test reply came back valid.
 - Decided: the AI is told about the tables from the database's own column descriptions (read when the app starts), so they can't drift from the real tables, plus hand-written rules, basketball definitions and three worked examples, and when each stat was first recorded.
-- Decided: player names in the question are looked up first, ignoring accents ("Doncic" finds "Dončić"), and the AI is given their exact IDs. Without this, most models tested searched for "Luka Doncic" and missed "Luka Dončić". Names the lookup misses are handled in step 13.
+- Decided: player names are stored without accents ("Luka Doncic", not "Luka Dončić"): nobody types them, and the source isn't consistent anyway ("Goran Dragic"). Before this, most models tested searched for "Luka Doncic" and found nothing.
+- Decided: player names in the question are looked up first and the AI is given the matching players. How names are matched is refined in step 13.
 - **Base case:** the AI writes the SQL, our code safety-checks and runs it, and a second AI call phrases the answer from the result rows (see "What happens when someone asks a question").
 - Build it behind a small interface (question in, answer, rows, SQL and usage out), so a different strategy can replace it without touching the rest.
 - **Not now: an "agent" loop**, where the AI gets a `run_sql` tool and can query several times before answering. It handles multi-step questions better, but multiplies AI calls on a free tier that's already the tightest limit. Revisit only if the accuracy test shows the base case failing on multi-step questions; the interface above makes it a drop-in change (capped at about 4 tool calls and 20 seconds, since API Gateway cuts requests off at 29 seconds).
@@ -178,10 +179,11 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 **13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost.
 - Gemini often answers "high demand" (503) or doesn't reply in time, on every model (about 1 call in 10 in testing), so retry with a short wait and fall back to a second free model (`gemini-3.5-flash-lite`).
 - Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
-- Player names the lookup (step 12) doesn't recognise: nicknames ("Shaq"), misspellings ("Luka Donkic"), lowercase last names ("doncic").
-  - The AI works out who is meant and searches with accents ignored: `unaccent(full_name) ILIKE 'luka doncic'`. It can't be told to write the accents itself, because the source's spelling isn't consistent ("Luka Dončić" but "Goran Dragic").
-  - Needs a migration adding Postgres's `unaccent` extension, installed in the `nba` schema (AI queries search only there, and the safety checker refuses schema-qualified calls), with `unaccent` added to the checker's allowed functions and the instructions updated.
-  - The lookup stays for names it does recognise: it's exact, testable without the AI, and gives both IDs when two players share a name.
+- Player names. The AI can't see the stored names, so it can only guess how a name is stored, and guesses wrong for players it doesn't know (see `spikes/FINDINGS.md`).
+  - The AI always searches with "contains", `full_name ILIKE '%…%'`: the full name if it knows the player (a nickname becomes the real name), otherwise the words given. It doesn't have to judge whether it knows the player, which it did badly.
+  - One row per player, most career points first, so players who share a name are never added together. For an ambiguous name ("James") it answers for the obvious player, says so, and lists a few others; it never refuses because a name is ambiguous, since each question is one request with no follow-up. No player ID numbers in the SQL, so it can't make one up.
+  - Possibly also the lookup, extended: a single first or last name gives up to 10 candidates whose name contains it (exact names first, then partial matches, each by career points), with seasons and points, so the AI picks from real players ("Mara" is Aday Mara, not Pete Maravich). A run of the name questions with and without it decides.
+  - A name search that finds nothing goes back to the AI once ("no player matched").
 
 **14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
