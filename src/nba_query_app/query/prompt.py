@@ -68,6 +68,8 @@ The query:
 - Top-N questions: ORDER BY and LIMIT. Ties matter, so for "who has the most" return
   at least the top 5. Never return more than 100 rows.
 - Round averages and percentages to 1 decimal place (cast to numeric first).
+- Write an apostrophe inside a string by doubling it ('%O''Neal%'), never with a
+  backslash.
 """
 
 GUIDANCE = """\

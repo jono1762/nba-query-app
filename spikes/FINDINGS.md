@@ -531,7 +531,7 @@ were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124
     rule assumed Magic Johnson, the list Joe Johnson (most points).
 - **Decision (2026-11-27): the simple rule, no lookup.** As good, and less code.
 - **Through the real app** (2026-11-27, `gemini-3.1-flash-lite`, both calls, the 42
-  questions; results in `spikes/output/gemini_names_confirm_20261127.json`): 34 of 41
+  questions; results in `spikes/output/gemini_names_confirm1_20261127.json`): 34 of 41
   right. Gemini was overloaded: it took three retry passes before every question had
   an answer. Typical answer 3.8 s and about 6,100 input tokens. Answers now say what
   they assumed ("Assuming LeBron James, he has scored 43,628 points in the regular
@@ -554,4 +554,17 @@ were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124
   for, at most 10, never `LIMIT 1`), so the database rather than the AI's memory
   decides who exists; the answer leads with the assumed player and names the next
   few. A fourth worked example ("How many points has James scored?") shows it, with
-  the regular-season filter. Not yet confirmed against the real model.
+  the regular-season filter. Misspellings are left as typed (see the rule above).
+- **Through the real app again, with that rule** (2026-11-27, same setup; results
+  in `spikes/output/gemini_names_confirm2_20261127.json`): 37 of 41 right, and a 38th
+  had the right rows but Gemini timed out phrasing the answer. Gemini was overloaded
+  again (three retry passes). Every rookie but the misspelt "Dybanza" was right,
+  Charles Smith, Eddie and Larry Johnson listed every player, "Mara" was Aday Mara
+  (Toumani Camara mentioned), "Johnson" assumed Magic Johnson and named Joe and
+  Eddie Johnson, and LeBron's total had the regular-season filter. Misses: the
+  misspellings "Dybanza" and "Alan Iversen", searched as typed and waiting for the
+  step 13 retry; and "Shaq", where the AI wrote `'%Shaquille O\'Neal%'`, a
+  backslash escape Postgres doesn't accept here, so the safety checker couldn't
+  parse it. The instructions now say to double an apostrophe ('O''Neal').
+  A quirk to watch: the `reason` sometimes names a guessed first name ("Assuming
+  Walter Stirtz") while the rows show the real player; the answer corrected it.
