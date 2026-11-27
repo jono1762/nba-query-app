@@ -4,8 +4,8 @@
 out (the plain-English answer, the rows, the SQL, and the AI calls and tokens
 used). `TwoStepAnswerer` is the base strategy (see docs/PLAN.md step 12):
 
-1. Find the players the question names (players.py) and build the instructions
-   (prompt.py), with today's date, the current season and the newest game.
+1. Build the instructions (prompt.py), with today's date, the current season and
+   the newest game.
 2. AI call 1 writes the SQL, or says the question can't be answered.
 3. The SQL is safety-checked and run read-only (run.py).
 4. AI call 2 phrases the answer from the result rows only.
@@ -26,7 +26,6 @@ from typing import Any, Literal, Protocol
 import psycopg
 
 from nba_query_app.llm.client import NO_USAGE, LlmClient, LlmError, LlmReply, Usage
-from nba_query_app.query.players import PlayerNames, with_seasons
 from nba_query_app.query.prompt import (
     ANSWER_INSTRUCTIONS,
     SQL_REPLY_SCHEMA,
@@ -78,7 +77,6 @@ class TwoStepAnswerer:
         self._conn = conn
         self._today = today
         self._instructions: str | None = None  # read from the database on first use
-        self._names: PlayerNames | None = None
 
     def ask(self, question: str) -> Answer:
         started = time.perf_counter()
@@ -108,7 +106,7 @@ class TwoStepAnswerer:
             calls.append(
                 self._llm.generate(
                     system=self._sql_instructions(),
-                    prompt=sql_request(question, self._context(question)),
+                    prompt=sql_request(question, self._context()),
                     json_schema=SQL_REPLY_SCHEMA,
                 )
             )
@@ -141,7 +139,8 @@ class TwoStepAnswerer:
         try:
             calls.append(
                 self._llm.generate(
-                    system=ANSWER_INSTRUCTIONS, prompt=answer_request(question, sql, result)
+                    system=ANSWER_INSTRUCTIONS,
+                    prompt=answer_request(question, sql, result, note=reason),
                 )
             )
         except LlmError as error:
@@ -153,14 +152,11 @@ class TwoStepAnswerer:
             self._instructions = sql_instructions(describe_schema(self._conn))
         return self._instructions
 
-    def _context(self, question: str) -> QuestionContext:
-        if self._names is None:
-            self._names = PlayerNames.load(self._conn)
-        players = with_seasons(self._conn, self._names.find(question))
+    def _context(self) -> QuestionContext:
         row = self._conn.execute("SELECT latest_game_date FROM nba.meta").fetchone()
         self._conn.rollback()  # leave no transaction open (run_query needs that)
         today = self._today()
-        return QuestionContext(today, season_for_date(today), row[0] if row else None, players)
+        return QuestionContext(today, season_for_date(today), row[0] if row else None)
 
 
 def _parse_sql_reply(text: str) -> tuple[bool, str, str] | None:

@@ -71,7 +71,7 @@ def test_answered_question(reader: psycopg.Connection) -> None:
     assert (answer.model, answer.llm_calls, answer.usage) == ("fake-model", 2, Usage(200, 20, 2))
 
 
-def test_first_call_asks_for_sql_with_the_date_season_and_players(
+def test_first_call_asks_for_sql_with_the_date_and_season(
     reader: psycopg.Connection,
 ) -> None:
     llm = FakeLlm(sql_reply(TOP_SCORER), "answer")
@@ -83,10 +83,7 @@ def test_first_call_asks_for_sql_with_the_date_season_and_players(
     assert "TABLE nba.player_game_stats" in first["system"]
     assert "Today is 2026-11-23. The current season is 2026-27." in first["prompt"]
     assert "newest game in the database was played on 2026-01-26" in first["prompt"]
-    assert (
-        '"Luka Dončić": Luka Doncic, player_id 1629029, played 2025-26 to 2025-26'
-        in first["prompt"]
-    )
+    assert first["prompt"].endswith("Question: How many points did Luka Dončić score?")
 
 
 def test_second_call_gets_only_the_question_sql_and_rows(reader: psycopg.Connection) -> None:
@@ -98,6 +95,7 @@ def test_second_call_gets_only_the_question_sql_and_rows(reader: psycopg.Connect
     assert second["system"] == ANSWER_INSTRUCTIONS
     assert second["json_schema"] is None
     assert "Question: Who scored the most?" in second["prompt"]
+    assert "Query note: From the box scores." in second["prompt"]
     assert "Luka Doncic | 73" in second["prompt"]
     assert "TABLE nba" not in second["prompt"]
 

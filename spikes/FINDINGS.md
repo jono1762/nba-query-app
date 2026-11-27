@@ -499,4 +499,37 @@ were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124
 - **Decision (2026-11-27): player names are stored without accents** ("Luka
   Doncic"; `nba_query_app/names.py`, migration 019). Nobody types accents and the
   source isn't consistent ("Goran Dragic"), so accents stop being a problem anywhere.
-  The rest of the matching strategy is in `docs/PLAN.md` step 13.
+- **Simple rule vs. lookup, names stored without accents** (2026-11-27,
+  `gemini-3.1-flash-lite`, the 42 name questions above plus "James", "Davis",
+  "Johnson", "James Harden" and "LeBron"; results in
+  `spikes/output/gemini_names_simple_vs_lookup_20261127.json`). The simple rule: the
+  AI always matches `full_name ILIKE '%…%'`, the full name if it knows the player,
+  otherwise the words given, one row per player, and for part of a name the likely
+  player with "Assuming …". Against the same rules plus a list of real players whose
+  name matches words in the question (exact first/last names first, by career
+  points). Every call got a reply.
+
+  | Name questions | Simple rule | Plus the list |
+  |---|---|---|
+  | Accents, lowercase, nicknames | 12 of 12 | 12 of 12 |
+  | Misspelt | 3 of 3 | 2 of 3 |
+  | Shared names | 7 of 7 | 5 of 7 |
+  | Rookies | 12 of 15 | 13 of 15 |
+  | Ambiguous (James, Davis, Harden, LeBron) | 3 of 4 | 4 of 4 |
+  | **All 41 with one right answer** | **37** | **36** |
+
+  - With names stored without accents, "contains" found every rookie it was asked
+    about, "Lendeborg" and "Mara" included.
+  - The list helped once ("Boozer this season": it showed Cameron Boozer as the only
+    one active; the simple rule assumed Carlos Boozer, retired). It hurt three times:
+    for "Charles Smith" and "Reggie Williams" the AI picked one player from the list
+    (`LIMIT 1`) instead of all of them, and it refused "Alan Iversen" because no
+    such name was listed.
+  - Other misses: "James" assumed LeBron but left out the regular-season filter
+    (52,248, a SQL slip, not a name problem); "Boozer" career gave Carlos only, not
+    all three; the misspelt unknown "Dybanza" failed both ways. "Johnson": the simple
+    rule assumed Magic Johnson, the list Joe Johnson (most points).
+- **Decision (2026-11-27): the simple rule, no lookup.** As good, and less code. Its
+  wording now says a shared full name returns every player, part of a name prefers a
+  player active in the season asked about, and "best known" means the most career
+  points + rebounds + assists (Magic Johnson ahead of Joe Johnson).

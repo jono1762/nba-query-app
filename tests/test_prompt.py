@@ -6,7 +6,6 @@ from datetime import date
 import psycopg
 from conftest import NbaData
 
-from nba_query_app.query.players import PlayerMatch
 from nba_query_app.query.prompt import (
     ANSWER_MAX_ROWS,
     EXAMPLES,
@@ -20,13 +19,7 @@ from nba_query_app.query.run import QueryResult
 from nba_query_app.query.safety import ALLOWED_TABLES, check_sql
 
 CONTEXT = QuestionContext(
-    today=date(2026, 11, 23),
-    current_season="2026-27",
-    latest_game_date=date(2026, 11, 20),
-    players=[
-        PlayerMatch("Eddie Johnson", 698, "Eddie Johnson", "1981-82", "1998-99"),
-        PlayerMatch("Eddie Johnson", 77144, "Eddie Johnson", "1977-78", "1986-87"),
-    ],
+    today=date(2026, 11, 23), current_season="2026-27", latest_game_date=date(2026, 11, 20)
 )
 
 
@@ -65,23 +58,26 @@ def test_instructions_include_the_schema() -> None:
     assert sql_instructions("SCHEMA HERE").endswith("SCHEMA HERE")
 
 
-def test_request_has_the_date_season_latest_game_and_players() -> None:
+def test_request_has_the_date_season_and_latest_game() -> None:
     request = sql_request("How many points did Eddie Johnson score?", CONTEXT)
 
-    assert "Today is 2026-11-23. The current season is 2026-27." in request
-    assert "newest game in the database was played on 2026-11-20" in request
-    assert '- "Eddie Johnson": Eddie Johnson, player_id 698, played 1981-82 to 1998-99' in request
-    assert '- "Eddie Johnson": Eddie Johnson, player_id 77144, played 1977-78 to 1986-87' in request
-    assert request.endswith("Question: How many points did Eddie Johnson score?")
+    assert request.splitlines() == [
+        "Today is 2026-11-23. The current season is 2026-27.",
+        "The newest game in the database was played on 2026-11-20.",
+        "",
+        "Question: How many points did Eddie Johnson score?",
+    ]
 
 
-def test_request_without_players_or_games() -> None:
-    context = QuestionContext(date(2026, 11, 23), "2026-27", None, [])
+def test_request_without_games() -> None:
+    context = QuestionContext(date(2026, 11, 23), "2026-27", None)
+    assert "played on unknown" in sql_request("Who won the most games?", context)
 
-    request = sql_request("Who won the most games?", context)
 
-    assert "Players named" not in request
-    assert "played on unknown" in request
+def test_names_are_matched_by_contains_never_by_id() -> None:
+    # The AI copies the examples closely, so none may filter on a player_id number.
+    assert "ILIKE '%Russell Westbrook%'" in EXAMPLES
+    assert not re.search(r"player_id\s*(=|IN)\s*\(?\d", EXAMPLES)
 
 
 def test_answer_request_shows_rows_and_nulls() -> None:
@@ -113,3 +109,12 @@ def test_answer_request_caps_rows_and_says_so() -> None:
 def test_answer_request_says_when_the_query_had_more_rows() -> None:
     request = answer_request("q", "SELECT ...", QueryResult(["n"], [(1,)], True))
     assert request.endswith("(and more rows not shown)")
+
+
+def test_answer_request_passes_on_the_query_note() -> None:
+    result = QueryResult(["full_name", "pts"], [("LeBron James", 43628)], False)
+
+    request = answer_request("Points by James?", "SELECT ...", result, note="Assuming LeBron James")
+
+    assert "Query note: Assuming LeBron James" in request
+    assert "Query note" not in answer_request("q", "SELECT ...", result)

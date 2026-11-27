@@ -7,12 +7,16 @@ Writing SQL (sql_instructions + sql_request):
 - when each stat was first recorded (nba.stat_tracked_since), so questions about
   stats before then are refused without running a query;
 - per question: today's date, the current season and the newest game loaded (the
-  model doesn't know the date), and the players the question names, with their
-  exact IDs (see players.py).
+  model doesn't know the date).
+Player names are matched by the AI itself with "contains" (full_name ILIKE
+'%...%'): names are stored without accents (names.py), and a search the AI writes
+this way finds players it doesn't know too. In testing this did as well as looking
+names up in our own code first (see spikes/FINDINGS.md).
 The reply follows SQL_REPLY_SCHEMA: {answerable, reason, sql}.
 
-Phrasing the answer (ANSWER_INSTRUCTIONS + answer_request): the question, the SQL
-and the result rows, nothing else. The model is told to use only those rows, so
+Phrasing the answer (ANSWER_INSTRUCTIONS + answer_request): the question, the SQL,
+the first call's note (its `reason`, e.g. "Assuming LeBron James") and the result
+rows, nothing else. The model is told to use only those rows, so
 the answer can't fill gaps from its own memory.
 """
 
@@ -22,7 +26,6 @@ from typing import Any
 
 import psycopg
 
-from nba_query_app.query.players import PlayerMatch
 from nba_query_app.query.run import QueryResult
 from nba_query_app.query.safety import ALLOWED_TABLES
 
@@ -69,11 +72,22 @@ The query:
 
 GUIDANCE = """\
 How to answer common questions:
-- Players named in the question are listed with their player_id under "Players
-  named in the question". Filter on player_id, not on full_name: the question may
-  spell the name differently from the database. If a name matches several players
-  and the question doesn't say which, include every one and return full_name and
-  seasons so the user can tell them apart.
+- Player names are stored without accents (Luka Doncic). Always match a name with
+  "contains": p.full_name ILIKE '%Stephen Curry%'. Use the player's full name if you
+  know who is meant, even from a nickname or a misspelling ("Shaq" is
+  '%Shaquille O''Neal%'); otherwise use the words the question gives ('%Demin%').
+  Never filter on a player_id number.
+- Several players can share a name: GROUP BY player_id and return full_name, one row
+  per player, so players are never added together. When a full name is shared
+  ("Eddie Johnson"), return every one of them, most career points + rebounds +
+  assists first. Give one total per player, not one per season, unless the question
+  asks for seasons.
+- When only part of a name is given and it could mean several players ("James"),
+  answer for the one the question most likely means and start reason with
+  "Assuming <full name>". Prefer a player active in the season asked about ("Boozer
+  this season" is Cameron Boozer); otherwise the best known, the one with the most
+  career points + rebounds + assists ("James" is LeBron James). Never set answerable
+  to false just because a name is ambiguous.
 - Season labels look like '2015-16'. "The 2016 Finals" or "the 2016 playoffs" is
   season '2015-16'; "the 2023-24 season" is '2023-24'; "this season" is the current
   season; "last season" is the one before it.
@@ -105,12 +119,14 @@ EXAMPLES = """\
 Examples:
 
 Question: How many triple-doubles did Russell Westbrook have in 2016-17?
-(Players named in the question: Russell Westbrook, player_id 201566)
-SELECT count(*) AS triple_doubles
+SELECT p.full_name, count(*) AS triple_doubles
 FROM nba.player_game_stats s JOIN nba.games g USING (game_id)
-WHERE s.player_id = 201566 AND g.season = '2016-17' AND g.season_type = 'Regular Season'
+  JOIN nba.players p USING (player_id)
+WHERE p.full_name ILIKE '%Russell Westbrook%'
+  AND g.season = '2016-17' AND g.season_type = 'Regular Season'
   AND (s.pts >= 10)::int + (s.reb >= 10)::int + (s.ast >= 10)::int
     + (coalesce(s.stl, 0) >= 10)::int + (coalesce(s.blk, 0) >= 10)::int >= 3
+GROUP BY p.player_id, p.full_name
 
 Question: Who won the 2016 championship?
 SELECT season, winner_abbreviation AS champion, loser_abbreviation AS runner_up,
@@ -136,7 +152,9 @@ question; the user also sees the rows and the SQL.
 - If the rows don't answer the question (no rows, or not what was asked), say that
   the data doesn't show it, briefly; don't guess.
 - If the rows hold several players with the same name, say so and give each one's
-  figures with their seasons.
+  figures.
+- If the query's note says which player it assumed ("Assuming LeBron James"), say
+  so in the answer, so the user can ask again if they meant someone else.
 - Write numbers as people do: 38,387 points, 29.7 points per game, 39.7%.
 """
 
@@ -146,7 +164,6 @@ class QuestionContext:
     today: date
     current_season: str
     latest_game_date: date | None
-    players: list[PlayerMatch]
 
 
 def describe_schema(conn: psycopg.Connection) -> str:
@@ -201,20 +218,20 @@ def sql_request(question: str, context: QuestionContext) -> str:
         f"Today is {context.today.isoformat()}. The current season is {context.current_season}.",
         f"The newest game in the database was played on "
         f"{context.latest_game_date.isoformat() if context.latest_game_date else 'unknown'}.",
+        "",
+        f"Question: {question}",
     ]
-    if context.players:
-        lines.append("Players named in the question:")
-        for p in context.players:
-            seasons = f", played {p.first_season} to {p.last_season}" if p.first_season else ""
-            lines.append(f'- "{p.mentioned_as}": {p.full_name}, player_id {p.player_id}{seasons}')
-    lines += ["", f"Question: {question}"]
     return "\n".join(lines)
 
 
-def answer_request(question: str, sql: str, result: QueryResult) -> str:
+def answer_request(question: str, sql: str, result: QueryResult, note: str = "") -> str:
+    """`note` is the SQL call's `reason`, which says when it assumed which player."""
     shown = result.rows[:ANSWER_MAX_ROWS]
     more = len(result.rows) - len(shown)
-    lines = [f"Question: {question}", "", "SQL:", sql, "", "Result rows:"]
+    lines = [f"Question: {question}", "", "SQL:", sql]
+    if note:
+        lines += ["", f"Query note: {note}"]
+    lines += ["", "Result rows:"]
     lines.append(" | ".join(result.columns))
     lines += [" | ".join(_cell(v) for v in row) for row in shown]
     if not result.rows:
