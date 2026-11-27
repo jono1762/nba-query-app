@@ -529,7 +529,26 @@ were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124
     (52,248, a SQL slip, not a name problem); "Boozer" career gave Carlos only, not
     all three; the misspelt unknown "Dybanza" failed both ways. "Johnson": the simple
     rule assumed Magic Johnson, the list Joe Johnson (most points).
-- **Decision (2026-11-27): the simple rule, no lookup.** As good, and less code. Its
-  wording now says a shared full name returns every player, part of a name prefers a
-  player active in the season asked about, and "best known" means the most career
-  points + rebounds + assists (Magic Johnson ahead of Joe Johnson).
+- **Decision (2026-11-27): the simple rule, no lookup.** As good, and less code.
+- **Through the real app** (2026-11-27, `gemini-3.1-flash-lite`, both calls, the 42
+  questions; results in `spikes/output/gemini_names_confirm_20261127.json`): 34 of 41
+  right. Gemini was overloaded: it took three retry passes before every question had
+  an answer. Typical answer 3.8 s and about 6,100 input tokens. Answers now say what
+  they assumed ("Assuming LeBron James, he has scored 43,628 points in the regular
+  season"; "Assuming you meant Allen Iverson…"; "There are two players named Larry
+  Johnson…"). The misses:
+  - "Use the full name if you know the player" backfired when it only thought it
+    knew: "Mara" became Lauri Markkanen (wrong but plausible), "Stirtz" became
+    "George Stirtz" and "Dybantsa" became "A.J. Dybantsa" (stored "AJ Dybantsa"),
+    both matching nobody. The same questions were right in the run before.
+  - It still cut to one player with `LIMIT 1`: "Charles Smith" and "Boozer" career
+    gave one player each, and "Johnson" picked Eddie Johnson, claiming he had the
+    most combined stats (Magic Johnson does).
+  - LeBron's total again included the playoffs (52,248).
+- **So the rule changed (2026-11-27):** search with the words the question gives,
+  rewritten only for a nickname or a clear misspelling, never adding a first name;
+  the SQL returns every matching player (one row each, ordered by the figure asked
+  for, at most 10, never `LIMIT 1`), so the database rather than the AI's memory
+  decides who exists; the answer leads with the assumed player and names the next
+  few. A fourth worked example ("How many points has James scored?") shows it, with
+  the regular-season filter. Not yet confirmed against the real model.

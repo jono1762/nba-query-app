@@ -49,7 +49,7 @@ def test_schema_leaves_no_transaction_open(nba_data: NbaData) -> None:
 
 def test_examples_pass_the_safety_checker() -> None:
     queries = [q.strip() for q in re.split(r"\nQuestion: .*\n(?:\(.*\)\n)?", EXAMPLES)[1:]]
-    assert len(queries) == 3
+    assert len(queries) == 4
     for sql in queries:
         check_sql(sql)
 
@@ -78,6 +78,7 @@ def test_names_are_matched_by_contains_never_by_id() -> None:
     # The AI copies the examples closely, so none may filter on a player_id number.
     assert "ILIKE '%Russell Westbrook%'" in EXAMPLES
     assert not re.search(r"player_id\s*(=|IN)\s*\(?\d", EXAMPLES)
+    assert "LIMIT 1\n" not in EXAMPLES
 
 
 def test_answer_request_shows_rows_and_nulls() -> None:

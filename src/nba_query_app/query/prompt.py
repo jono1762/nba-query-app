@@ -72,22 +72,21 @@ The query:
 
 GUIDANCE = """\
 How to answer common questions:
-- Player names are stored without accents (Luka Doncic). Always match a name with
-  "contains": p.full_name ILIKE '%Stephen Curry%'. Use the player's full name if you
-  know who is meant, even from a nickname or a misspelling ("Shaq" is
-  '%Shaquille O''Neal%'); otherwise use the words the question gives ('%Demin%').
-  Never filter on a player_id number.
-- Several players can share a name: GROUP BY player_id and return full_name, one row
-  per player, so players are never added together. When a full name is shared
-  ("Eddie Johnson"), return every one of them, most career points + rebounds +
-  assists first. Give one total per player, not one per season, unless the question
-  asks for seasons.
-- When only part of a name is given and it could mean several players ("James"),
-  answer for the one the question most likely means and start reason with
-  "Assuming <full name>". Prefer a player active in the season asked about ("Boozer
-  this season" is Cameron Boozer); otherwise the best known, the one with the most
-  career points + rebounds + assists ("James" is LeBron James). Never set answerable
-  to false just because a name is ambiguous.
+- Player names are stored without accents (Luka Doncic). Match a name with
+  "contains", using the words the question gives: p.full_name ILIKE '%Stirtz%',
+  '%Luka Doncic%'. Change them only for a nickname or a clear misspelling ("Shaq" is
+  '%Shaquille O''Neal%', "Alan Iversen" is '%Allen Iverson%'). Never add a first
+  name or initials the question didn't give. Never filter on a player_id number.
+- A name can match several players. Return every one, one row per player (GROUP BY
+  player_id, full_name), so players are never added together, ordered by the figure
+  asked for, highest first, at most 10 rows. Never cut the list to one player with
+  LIMIT 1. Give one total per player, not one per season, unless the question asks
+  for seasons.
+- When only part of a name is given and it matches several players ("James"),
+  still return them all, and start reason with "Assuming <full name>" for the one
+  the question most likely means: a player active in the season asked about
+  ("Boozer this season" is Cameron Boozer), otherwise the best known ("James" is
+  LeBron James). Never set answerable to false just because a name is ambiguous.
 - Season labels look like '2015-16'. "The 2016 Finals" or "the 2016 playoffs" is
   season '2015-16'; "the 2023-24 season" is '2023-24'; "this season" is the current
   season; "last season" is the one before it.
@@ -133,6 +132,14 @@ SELECT season, winner_abbreviation AS champion, loser_abbreviation AS runner_up,
   winner_wins || '-' || loser_wins AS series
 FROM nba.playoff_series WHERE season = '2015-16' AND playoff_round_name = 'Finals'
 
+Question: How many points has James scored?
+(reason: Assuming LeBron James)
+SELECT full_name, sum(pts) AS points
+FROM nba.player_season_stats
+WHERE full_name ILIKE '%James%' AND season_type = 'Regular Season'
+GROUP BY player_id, full_name
+ORDER BY points DESC LIMIT 10
+
 Question: Highest career scoring average in the playoffs, at least 50 games?
 SELECT full_name, sum(games) AS games, sum(pts) AS points,
   round(sum(pts)::numeric / sum(games), 1) AS points_per_game
@@ -153,8 +160,10 @@ question; the user also sees the rows and the SQL.
   the data doesn't show it, briefly; don't guess.
 - If the rows hold several players with the same name, say so and give each one's
   figures.
-- If the query's note says which player it assumed ("Assuming LeBron James"), say
-  so in the answer, so the user can ask again if they meant someone else.
+- If the query's note says which player it assumed ("Assuming LeBron James"), lead
+  with that player's figures and say you assumed him, then name the next two or
+  three players in the rows briefly, so the user can ask again if they meant
+  someone else.
 - Write numbers as people do: 38,387 points, 29.7 points per game, 39.7%.
 """
 
