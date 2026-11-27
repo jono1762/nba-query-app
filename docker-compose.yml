@@ -7,7 +7,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nba_local_dev}
       POSTGRES_DB: ${POSTGRES_DB:-nba}
     ports:
-      - "5432:5432"
+      # Only this machine can connect (not other devices on the same network):
+      # the password is the well-known local default from .env.example.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
