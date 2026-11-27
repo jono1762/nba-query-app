@@ -1,6 +1,6 @@
 """Find the players a question names, so the AI is told their exact IDs.
 
-Without this the AI guesses at names: in testing, every model searched for
+Without this the AI guesses at names: in testing, most models searched for
 full_name = 'Luka Doncic' and found nothing, because the database has 'Luka Dončić'.
 So before asking the AI, the question is matched against every player's name,
 ignoring accents, case and punctuation, and the matches (with player_id and the

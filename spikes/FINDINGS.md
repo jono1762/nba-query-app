@@ -378,26 +378,38 @@ Script: `spikes/gemini_free_tier.py` (`probe`, then `format basic|hard <model> .
 - **Overload errors (503) and timeouts happen** on every model at times, so a
   retry, and falling back to a second model, is needed (step 13).
 - **Harder questions** (`format hard`: 14 multi-step questions, correct answers
-  worked out from the database first and kept next to each question in the script):
-  - `gemini-3.1-flash-lite`: **13 of 14 right**, 2-4 s each, no errors. It got the
-    games-played filter, career 40-point games across season types, the youngest
-    40-point scorer (by age on game day), Finals triple-doubles, Curry's playoff
-    3-point % (summed, not averaged), the highest-scoring season, the most points
-    against the Celtics, Wilt's 65-game streak of 30-point games (a gaps-and-islands
-    query), the Lakers' overtime record "last season", the top No. 1 pick, Fisher vs
-    Duncan, and both Eddie Johnsons.
-  - The miss: "Luka Doncic" without accents returned 0 (really 11). **Every model
-    made it, full Flash included**, so the player-name lookup is required, not
-    optional.
+  worked out from the database first and kept next to each question in the script).
+  Run fairly on 2026-11-24 and 2026-11-27: every model got the same questions, and
+  calls lost to overload, timeouts or the free limit were rerun where the limit
+  allowed (results in `spikes/output/gemini_format_*_2026112[47]-*.json`). Right
+  answers out of those answered, both sets:
+
+  | Model | Hard | Basic | Unanswered | Time per reply |
+  |---|---|---|---|---|
+  | `gemini-3.1-flash-lite` | 12 of 14 | 9 of 10 | 0 | 2-10 s |
+  | `gemini-3.5-flash-lite` | 13 of 14 | 9 of 10 | 0 | 2-5 s, once 78 s |
+  | `gemini-3-flash-preview` | 13 of 14 | 9 of 10 | 0 | 3-196 s |
+  | `gemini-3.5-flash` | 14 of 14 | 5 of 6 | 3 (free limit), 1 (timeout) | 5-237 s |
+  | `gemini-3.6-flash` | 12 of 13 | 5 of 5 | 4 (free limit), 2 (timeout) | 6-104 s |
+
+  - **Almost every miss was an unaccented name.** Luka Dončić's 50-point games and
+    Nikola Jokić's triple-doubles returned 0 because the query matched `full_name =
+    'Luka Doncic'`. Only `gemini-3.6-flash` and `gemini-3.5-flash` handled the
+    accent on their own (`full_name IN ('Luka Doncic', 'Luka Dončić')`,
+    `ILIKE 'luka don%'`), and `gemini-3.5-flash` still missed Jokić.
+  - The other misses: the 30-point streak counted as a career total (3.1-lite, 577;
+    the instructions now explain streaks) and a misnamed column (3.6-flash).
+  - So on accuracy the models are close once names are handled; they differ on
+    speed and availability. The full Flash models "think" first (up to 63,000
+    thinking tokens on `gemini-3-flash-preview`), often take longer than API
+    Gateway's 29-second cutoff, and run out of their free daily allowance after
+    about 10-15 requests, retries included.
+  - Availability changes by the day: on 2026-11-24 `gemini-3.1-flash-lite` answered
+    1 of 24 (the rest were "high demand" even after 3 retries); on 2026-11-27 it
+    answered all 24 first time.
   - Several queries returned only a name (e.g. `Cooper Flagg`) without the value
-    that answers the question (age, points). The instructions should ask for the
+    that answers the question (age, points). The instructions now ask for the
     figures too, so the answer step can quote them.
-  - `gemini-3.5-flash-lite`: 10 of 12 answered right; it called a 577-game career
-    span a "streak", refused Eddie Johnson as ambiguous, and had two 503s.
-  - `gemini-3-flash-preview`: right on all 6 it answered, but 8 of 14 took longer
-    than 120 seconds.
-  - `gemini-3.6-flash` hit "exceeded your current quota" (429) after its 12th
-    request of the day, so its free daily limit is lower than the 20 reported.
   - The 1954 Lakers title was missing from the data (the 1953-54 playoffs had no
     rounds), so "most championships" gave the Lakers 16, not 17. Fixed on its own
     branch (`fix/1954-playoffs`).
@@ -413,6 +425,49 @@ Script: `spikes/gemini_free_tier.py` (`probe`, then `format basic|hard <model> .
 - **Gemini's overload errors are common:** in about 30 calls through the flow, two
   were "high demand" (503) and one took longer than 20 s, each on the second call.
   Step 13 adds retries and a fallback model.
+- **Through the real flow on `gemini-3.5-flash-lite`** (2026-11-24, the 14 hard
+  questions): 11 right, against 13 in the spike. It refused Fisher vs Duncan
+  ("player playoff wins aren't stored"), and two queries failed on a column error;
+  retrying with the error (step 13) should catch those.
 - **Decision: start with `gemini-3.1-flash-lite`**, as one setting so it's easy to
-  change. Move to a stronger model only if the accuracy test (step 14) shows it
-  isn't good enough.
+  change, with `gemini-3.5-flash-lite` as the fallback when it's overloaded. The
+  two are close; the accuracy test (step 14) decides between them, and whether a
+  stronger model is needed.
+
+## Player names: the lookup vs. `unaccent` (2026-11-24)
+
+The question: instead of looking names up before the AI call (`query/players.py`),
+could the AI work out who is meant and search with accents ignored, using Postgres's
+`unaccent` add-on: `unaccent(full_name) ILIKE unaccent('Luka Doncic')`? The AI can't
+be told to write the accents itself, because the source's spelling isn't consistent:
+`Luka Dončić`, but `Goran Dragic`.
+
+Test: a one-off script (not kept) on `gemini-3.5-flash-lite`, the SQL-writing call
+only, run read-only against a copy of the database with `unaccent` installed. Three
+versions of the instructions: the lookup only (as built), `unaccent` only (with the
+rule "always GROUP BY player_id and return full_name and seasons, so players with the
+same name are never added together"), and both. 22 name questions with answers worked
+out from the database, plus the 24 hard and basic questions. Calls lost to overload
+were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124.json`.
+
+| Name questions | Lookup only | `unaccent` only | Both |
+|---|---|---|---|
+| Accents ("luka doncic", "Goran Dragić") | 6 of 6 | 6 of 6 | 6 of 6 |
+| Lowercase last name ("porzingis") | 2 of 3 | 3 of 3 | 3 of 3 |
+| Misspelt ("Alan Iversen") | 1 of 3 | 3 of 3 | 3 of 3 |
+| Nickname ("the Joker", "Shaq") | 3 of 3 | 3 of 3 | 3 of 3 |
+| Shared name ("Charles Smith", 3 players) | 6 of 7 | 7 of 7 | 3 of 7 |
+| **All 22** | **18** | **22** | **18** |
+| Hard questions | 11 of 14 | 12 of 13 | 12 of 14 |
+| Basic questions | 10 of 10 | 9 of 10 | 9 of 10 |
+
+- With `unaccent` only, the AI used `unaccent` in all 22 name questions and never
+  added two players with the same name together.
+- The shared-name misses weren't merged players: the right figures came back, but
+  season by season instead of totalled per player. The rule's "return seasons"
+  probably invites that.
+- The misses on the other questions were SQL mistakes (a wrong column) and the
+  Fisher vs Duncan refusal, in every version.
+- Not tested yet: a rookie the model has never heard of, asked about by last name
+  alone. Without a first name `ILIKE unaccent('Dybantsa')` finds nothing, which the
+  lookup handles.
