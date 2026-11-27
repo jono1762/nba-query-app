@@ -79,24 +79,59 @@ def test_playoffs_in_progress_count_forward() -> None:
     assert rounds_by_series(result, second) == {(2, "Conference Semifinals")}
 
 
-def test_round_robin_is_not_inferred() -> None:
-    # 1953-54: three teams each played the other two; teams lost and played on.
+def test_a_loser_playing_on_is_not_inferred() -> None:
+    # A round robin not listed in ROUND_ROBIN_LAST_DAY: teams lost and played on.
     b = Bracket()
     b.series(0, 1, 2, "2-0")
     b.series(2, 1, 3, "2-0")
     b.series(4, 3, 2, "2-0")
     b.series(10, 1, 3, "4-1")
 
-    assert playoff_rounds("1953-54", b.rows) is None
+    assert playoff_rounds("1960-61", b.rows) is None
 
 
 def test_overlapping_series_are_not_inferred() -> None:
-    # The real 1953-54 round robin: a team's games against both others interleave.
+    # A team's games against two others interleave, as in a round robin.
     b = Bracket()
     b.series(0, 1, 2, "2-0")
     b.series(1, 3, 2, "2-0")  # team 2 again, while its first pairing is still going
 
-    assert playoff_rounds("1953-54", b.rows) is None
+    assert playoff_rounds("1960-61", b.rows) is None
+
+
+def test_1953_54_round_robin_then_knockout() -> None:
+    # The real shape: a round robin in each division (ends 1954-03-22), then division
+    # finals in which two pairs met again, then the Finals.
+    syr, bos, nyk, mnl, roc, ftw = 1, 2, 3, 4, 5, 6
+    rows: list[PlayoffGame] = []
+
+    def game(game_id: str, day: date, winner: int, loser: int) -> None:
+        rows.extend(
+            [PlayoffGame(game_id, day, winner, True), PlayoffGame(game_id, day, loser, False)]
+        )
+
+    march = lambda d: date(1954, 3, d)  # noqa: E731
+    game("rr1", march(16), bos, nyk)
+    game("rr2", march(17), syr, bos)
+    game("rr3", march(18), syr, nyk)
+    game("rr4", march(17), mnl, roc)
+    game("rr5", march(18), mnl, ftw)
+    game("rr6", march(22), syr, bos)
+    game("df0", march(24), mnl, roc)
+    game("df1", march(25), syr, bos)
+    game("df2", march(27), syr, bos)
+    game("df3", march(27), roc, mnl)
+    game("df4", march(28), mnl, roc)
+    game("f1", march(31), mnl, syr)
+    game("f2", date(1954, 4, 3), syr, mnl)
+    game("f3", date(1954, 4, 4), mnl, syr)
+
+    result = playoff_rounds("1953-54", rows)
+
+    assert rounds_by_series(result, [f"rr{i}" for i in range(1, 7)]) == {(1, "Round Robin")}
+    assert rounds_by_series(result, ["df0", "df1", "df2", "df3", "df4"]) == {(2, "Division Finals")}
+    assert rounds_by_series(result, ["f1", "f2", "f3"]) == {(3, "Finals")}
+    assert [result[i].series_game for i in ("rr2", "rr6", "df1", "df2")] == [1, 2, 1, 2]
 
 
 def test_no_playoff_games_means_no_rounds() -> None:

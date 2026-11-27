@@ -324,10 +324,10 @@ def test_team_minutes_not_a_game_length(nba_data: NbaData) -> None:
 
 
 def test_playoff_games_without_round(nba_data: NbaData) -> None:
-    nba_data.game("p1", "1953-54", "Playoffs")
+    nba_data.game("p1", "1960-61", "Playoffs")
     nba_data.game("p2", "1954-55", "Playoffs", playoff_round=(1, "Division Semifinals", 1))
 
-    assert violations(nba_data, "playoff_games_without_round") == [("p1", "1953-54")]
+    assert violations(nba_data, "playoff_games_without_round") == [("p1", "1960-61")]
 
 
 def test_playoff_round_differs_from_game_id(nba_data: NbaData) -> None:

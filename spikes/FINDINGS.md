@@ -298,9 +298,16 @@ type.
   gets the round wrong.
 - **Result:** every season from 1946-47 resolves to a knockout bracket with a single
   Finals, except **1953-54**, whose playoffs began with a round robin (three teams
-  in each division each playing the other two). Its 23 games are left without a
-  round. Every inferred champion matches the real list; 10 are spot-checked
-  automatically (`KNOWN_CHAMPIONS`).
+  in each division each playing the other two; the West's second Minneapolis-Rochester
+  game wasn't played), then division finals and the Finals. Two pairs met in both
+  the round robin and the division finals, so the stages can only be split by date:
+  the round robin ended on 1954-03-22 (the East's last game; the West's was 03-21).
+  **Decision (2026-11-23): that date is listed by hand** (`ROUND_ROBIN_LAST_DAY`);
+  the 11 round-robin games are round 1, `Round Robin`, and the 12 after it are
+  inferred as usual (Division Finals, then Minneapolis beating Syracuse 4-3 in the
+  Finals). Leaving the season without rounds had dropped that title, giving the
+  Lakers 16 championships instead of 17. Every inferred champion matches the real
+  list; 11 are spot-checked automatically (`KNOWN_CHAMPIONS`, 1953-54 included).
 - **Playoffs in progress** count forward with the current 4-round format. Replaying
   the 1983-84, 2024-25 and 2025-26 playoffs day by day gives every game the same
   round on each day as in the final result.
