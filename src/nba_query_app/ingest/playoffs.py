@@ -14,8 +14,11 @@ inferred from who played whom:
   round after the latest series either team came from, with the current
   PLAYOFF_ROUNDS-round format.
 - Anything that isn't a knockout bracket returns None rather than guess: a team
-  playing two series at once, a loser playing on, or a tied pair playing on. The
-  1953-54 round robin (three teams each playing the other two) is one.
+  playing two series at once, a loser playing on, or a tied pair playing on.
+- The one exception, 1953-54, is listed by hand (ROUND_ROBIN_LAST_DAY): its
+  playoffs began with a round robin (three teams in each division each played the
+  other two twice), then division finals and the Finals. The round robin is round
+  1, "Round Robin", and the knockout games after it are inferred as above.
 
 This module does no network or database work.
 """
@@ -29,6 +32,12 @@ from datetime import date
 PLAYOFF_ROUNDS = 4
 # Divisions were the top-level groups until 1970-71, when conferences began.
 FIRST_CONFERENCE_SEASON = "1970-71"
+
+# Playoffs that began with a round robin: the round robin's last day. Two pairs
+# met again in the division finals (Syracuse-Boston, Minneapolis-Rochester), so
+# the stages can't be told apart from who played whom, only by date.
+ROUND_ROBIN_LAST_DAY = {"1953-54": date(1954, 3, 22)}
+ROUND_ROBIN = "Round Robin"
 
 
 @dataclass(frozen=True)
@@ -84,6 +93,25 @@ def playoff_rounds(season: str, rows: list[PlayoffGame]) -> dict[str, PlayoffRou
     `rows` has each game's two team rows. Returns None if the games don't form a
     knockout bracket (see the module docstring).
     """
+    last_day = ROUND_ROBIN_LAST_DAY.get(season)
+    if last_day is None:
+        return _knockout_rounds(season, rows)
+
+    knockout = _knockout_rounds(season, [r for r in rows if r.game_date > last_day])
+    if knockout is None:
+        return None
+    result = {
+        game_id: PlayoffRound(r.round + 1, r.round_name, r.series_game)
+        for game_id, r in knockout.items()
+    }
+    # In the round robin, series_game numbers each pair's games (1, 2).
+    for pairing in _group_into_series([r for r in rows if r.game_date <= last_day]):
+        for number, (_, game_id) in enumerate(pairing.games, start=1):
+            result[game_id] = PlayoffRound(1, ROUND_ROBIN, number)
+    return result
+
+
+def _knockout_rounds(season: str, rows: list[PlayoffGame]) -> dict[str, PlayoffRound] | None:
     series = _group_into_series(rows)
     if not series:
         return {}

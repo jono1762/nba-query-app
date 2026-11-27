@@ -661,7 +661,7 @@ def test_regular_season_games_have_no_playoff_round(response: dict, team_respons
 def test_playoffs_that_arent_a_bracket_are_left_without_rounds(
     response: dict, team_response: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(  # what playoff_rounds says for e.g. the 1953-54 round robin
+    monkeypatch.setattr(  # what playoff_rounds says when the games aren't a bracket
         "nba_query_app.ingest.normalize.playoff_rounds", lambda season, rows: None
     )
 
