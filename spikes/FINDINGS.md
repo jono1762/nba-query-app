@@ -546,7 +546,10 @@ were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124
     most combined stats (Magic Johnson does).
   - LeBron's total again included the playoffs (52,248).
 - **So the rule changed (2026-11-27):** search with the words the question gives,
-  rewritten only for a nickname or a clear misspelling, never adding a first name;
+  rewritten only for a well-known nickname, never adding a first name (the AI
+  writes the query before seeing any data, so it can't tell a misspelling from a
+  name it doesn't know; misspellings wait for the step 13 retry after a search
+  finds nothing);
   the SQL returns every matching player (one row each, ordered by the figure asked
   for, at most 10, never `LIMIT 1`), so the database rather than the AI's memory
   decides who exists; the answer leads with the assumed player and names the next

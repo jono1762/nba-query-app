@@ -74,9 +74,9 @@ GUIDANCE = """\
 How to answer common questions:
 - Player names are stored without accents (Luka Doncic). Match a name with
   "contains", using the words the question gives: p.full_name ILIKE '%Stirtz%',
-  '%Luka Doncic%'. Change them only for a nickname or a clear misspelling ("Shaq" is
-  '%Shaquille O''Neal%', "Alan Iversen" is '%Allen Iverson%'). Never add a first
-  name or initials the question didn't give. Never filter on a player_id number.
+  '%Luka Doncic%', even if they look misspelt. Change them only for a well-known
+  nickname ("the Joker" is '%Nikola Jokic%'). Never add a first name or initials
+  the question didn't give. Never filter on a player_id number.
 - A name can match several players. Return every one, one row per player (GROUP BY
   player_id, full_name), so players are never added together, ordered by the figure
   asked for, highest first, at most 10 rows. Never cut the list to one player with
