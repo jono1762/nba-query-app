@@ -16,9 +16,11 @@ Built so far:
 - season-totals view, and stat-coverage views ("tracked since")
 - data-quality checks
 - SQL safety checker, and a runner that runs checked SQL as the read-only user
+- Gemini client, AI instructions, and the two-call flow that answers a question, with a command-line version
 
 Not built yet:
-- LLM pipeline and accuracy eval
+- retries, refusals and cost logging (step 13)
+- accuracy eval
 - API and frontend
 - AWS deploy
 
@@ -26,12 +28,13 @@ The phased plan, with decisions, trade-offs and a progress table, is in `docs/PL
 
 ## Commands
 
-Use uv for everything; there's no plain pip workflow. Database tests and the migration runner read `DATABASE_URL`, which `--env-file .env` provides (copy it from `.env.example`).
+Use uv for everything; there's no plain pip workflow. Database tests and the migration runner read `DATABASE_URL` (the admin login); anything that runs AI-written SQL reads `READER_DATABASE_URL` (a read-only login). `--env-file .env` provides both (copy it from `.env.example`).
 
 ```bash
 uv sync                                                # create .venv, install deps
 docker compose up -d                                   # local Postgres 16 on :5432
 uv run --env-file .env python -m nba_query_app.db.migrate   # apply migrations
+docker compose exec db psql -U nba -c "CREATE ROLE nba_app_reader LOGIN PASSWORD 'reader_local_dev' IN ROLE nba_reader"   # once: read-only login (READER_DATABASE_URL)
 
 uv run ruff check . && uv run ruff format --check .    # lint + format check (CI runs both)
 uv run --env-file .env pytest                          # all tests
@@ -40,13 +43,14 @@ uv run --env-file .env pytest tests/test_load.py::test_corrected_stat_is_updated
 uv run --env-file .env python -m nba_query_app.ingest.backfill [--from 2026-27] [--season-type regular|cup-final|play-in|playoffs|all]
 uv run --env-file .env python -m nba_query_app.ingest.player_details   # player details only (first run ~2 h for birth dates)
 uv run --env-file .env python -m nba_query_app.quality      # data-quality report (read-only; the backfill also runs it)
+uv run --env-file .env python -m nba_query_app.ask "question"   # ask the real AI (up to 2 calls from the free allowance)
 ```
 
 The backfill makes real requests to stats.nba.com (about 340 for the full history, two per season and season type, roughly 10 minutes). Run it only when data is actually needed.
 
 Without `DATABASE_URL`, database tests are **skipped**. With `REQUIRE_DATABASE=1` (set in CI) they **fail** instead.
 
-Spike scripts declare their own dependencies inline and run in isolation: `uv run spikes/stats_nba_gamelog.py [season]`.
+Spike scripts declare their own dependencies inline and run in isolation: `uv run spikes/stats_nba_gamelog.py [season]`, `uv run --env-file .env spikes/gemini_free_tier.py probe|format basic|hard <model>...`.
 
 ## Architecture
 
@@ -76,6 +80,7 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - **The team log decides each game's home/away and W/L.** It has one row per team, and its winner always has the higher score, while a few old player rows carry wrong labels (e.g. 1974-11-19, where the player rows say CLE won with 85 to HOU's 94). Player rows follow it, and overruled labels are counted. The rules below for home/away and W/L are the fallback for games missing from the team log.
 - Home/away comes from `MATCHUP`: `'X vs. Y'` means X is home, `'X @ Y'` means X is away.
 - Both teams listed as `@` means a **neutral-site game**. Then `home_team_id` and `away_team_id` are NULL, `neutral_site` is true, and `is_home` is NULL for those player rows. A CHECK constraint enforces this.
+- **Player names are stored without accents** (`names.py`, `strip_accents`): "Luka Doncic", not "Luka Dončić". Nobody types accents in a question, and the source isn't consistent anyway ("Goran Dragic"). Migration 019 converted the names already stored, and a CHECK on `players.full_name` allows plain ASCII only, so a letter `strip_accents` doesn't handle stops the load rather than slipping through.
 - **Unrecorded stats are NULL, never 0.** Early seasons lack many stats (no blocks or steals before 1973-74, no 3-pointers before 1979-80, minutes missing in the earliest years). Only `pts`, `fgm` and `ftm` are required.
   - Early seasons report `MIN = 0` for players whose minutes weren't recorded (everyone in the earliest years, some players into the early 1980s). So a 0 becomes NULL when its team's minutes fall 15+ short of the game length (240, plus 25 per overtime, judged from the team with more minutes). A 0 on a team whose minutes add up is real (under 30 seconds).
   - Attempts lower than makes (an impossible value in old box scores) become NULL attempts.
@@ -104,10 +109,32 @@ Spike scripts declare their own dependencies inline and run in isolation: `uv ru
 - Brackets nested more than about 45 deep hit Python's recursion limit inside sqlglot; that's refused as "nested too deeply".
 
 **Running AI-written SQL** (`query/run.py`): `run_query(conn, sql)` checks the SQL, then `run_read_only` runs it with Postgres's own guards, which hold even if the checker misses something. Tests call `run_read_only` directly to prove that.
-- It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that means AI-written SQL needs a login user in `nba_reader`.
+- It refuses to start (`WriteAccessError`) if the user can write to any `nba` table, so connecting as the admin by mistake fails loudly. Locally that's `nba_app_reader` (`READER_DATABASE_URL`, created once with the command above).
 - One transaction: `SET TRANSACTION READ ONLY`, then `statement_timeout` (5 s by default) and `search_path = nba` as `SET LOCAL`, which end with the transaction, so the connection can be reused. The connection must not already be in a transaction.
 - The SQL as written is run (not sqlglot's regenerated version, which renames functions), through a server-side cursor: `DECLARE … CURSOR FOR` accepts only one SELECT/VALUES with no data-modifying WITH, and only `max_rows + 1` rows (100 by default) leave the server. `QueryResult.truncated` says whether there were more.
+- Intervals (e.g. `age(game_date, birth_date)`) come back as Postgres's text, `'18 years 11 mons 25 days'`, not a Python timedelta, which counts only days.
 - A timeout raises `QueryTimeoutError`; other database errors (e.g. a misspelt column) come through as psycopg errors.
+
+**Answering a question** (`query/ask.py`). `Answerer.ask(question) -> Answer` is the interface the rest of the app uses; `Answer` holds the status (`answered`, `refused` or `failed`), the text (the answer, the refusal reason, or what went wrong), the SQL, columns, rows, `truncated`, the model, the number of AI calls, summed `Usage` and seconds. `TwoStepAnswerer(llm, conn)` is the base strategy:
+1. build the instructions (`prompt.py`) with today's date, the season and the newest game;
+2. AI call 1 returns `{answerable, reason, sql}`; not answerable means status `refused`;
+3. `run_query` safety-checks and runs the SQL read-only;
+4. AI call 2 phrases the answer from the rows only (plus call 1's note, e.g. which player it assumed).
+- Failures (AI unreachable, a reply in the wrong shape, unsafe SQL, a database error or timeout) come back as status `failed`, not exceptions, so the calls and tokens used are still known. The rows are kept if only the second call failed. Retries are step 13.
+- `conn` must be a read-only user's connection with no open transaction; the CLI connects with autocommit. The instructions are read from the database once per `TwoStepAnswerer`.
+- Questions are whitespace-collapsed; empty ones or ones over 500 characters fail without an AI call.
+- `nba_query_app/ask.py` is the command-line version (`format_answer` prints the result).
+
+**The AI's instructions** (`query/prompt.py`).
+- Writing SQL: `sql_instructions(describe_schema(conn))` is the system prompt: rules, basketball definitions and four worked examples (written in `prompt.py`), then every `ALLOWED_TABLES` table and column with its COMMENT, read from the database, then `nba.stat_tracked_since` (when each stat was recorded, so early-season questions are refused without a query). `sql_request(question, QuestionContext)` adds today's date, the current season and `meta.latest_game_date`. The reply follows `SQL_REPLY_SCHEMA`: `{answerable, reason, sql}`.
+- Phrasing the answer: `ANSWER_INSTRUCTIONS` plus `answer_request(question, sql, result, note)`, which gives the model the rows (at most `ANSWER_MAX_ROWS`), the first call's `reason` as a note (so "Assuming LeBron James" reaches the answer) and nothing else, and tells it to use only the rows.
+- Player names: the AI matches them itself with "contains" (`full_name ILIKE '%Stirtz%'`), using the words the question gives, even if they look misspelt, and rewriting them only for a well-known nickname ("the Joker"), never adding a first name it isn't sure of. It writes the query before seeing any data, so misspellings are left to a retry after a search finds nothing (step 13). Names are stored without accents. The SQL returns every matching player, one row each (`GROUP BY player_id`), ordered by the figure asked for, at most 10, never `LIMIT 1`, so namesakes are never added together and the database decides who exists. For part of a name ("James") the `reason` says "Assuming <name>" (active in the season asked about, else best known) and the answer leads with him and names the next few; never refused as ambiguous, since each question is one request. Never a `player_id` number, so it can't invent one. One worked example shows this. In testing this did as well as looking names up in our code first (`spikes/FINDINGS.md`).
+- `describe_schema` rolls back after reading, so the connection has no open transaction when `run_read_only` needs it.
+
+**AI model client** (`llm/`). `client.py` defines what callers need from a model: `LlmClient.generate(system=, prompt=, json_schema=)` returns an `LlmReply` (text, model, `Usage` in input/output/thinking tokens, seconds). Callers take an `LlmClient`, so tests pass a fake and never call the real model. `gemini.py` is the Gemini version over the REST API (no SDK, to keep the Lambda package small).
+- The model is a setting: `GEMINI_MODEL`, default `gemini-3.1-flash-lite`, the cheapest model that did the job in testing (see `spikes/FINDINGS.md`). The key comes from `GEMINI_API_KEY`, is sent in a header, never in the URL, and never appears in error messages.
+- With `json_schema`, Gemini's structured output forces the reply into that JSON shape. Temperature is 0.
+- Errors: `LlmQuotaError` (429, free allowance used up), `LlmUnavailableError` (overloaded, timed out or unreachable; worth retrying), otherwise `LlmError` (including a blocked reply or one cut off before `STOP`). The timeout is 20 s, since API Gateway cuts requests off at 29 s.
 
 **Migrations.** Numbered plain-SQL files in `migrations/`, applied by `db/migrate.py`. Each file runs in its own transaction and is recorded in `public.schema_migrations`. Never edit an applied migration; add a new numbered file. Column `COMMENT`s are deliberate: they're meant to be fed to the LLM as schema documentation, so keep them accurate and plain.
 

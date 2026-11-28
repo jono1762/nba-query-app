@@ -144,3 +144,9 @@ def test_query_cannot_switch_off_its_own_time_limit(reader: psycopg.Connection) 
     sql = "SELECT set_config('statement_timeout', '0', false), pg_sleep(3)"
     with pytest.raises(QueryTimeoutError):
         run_read_only(reader, sql, timeout_ms=200)
+
+
+def test_intervals_come_back_as_postgres_writes_them(reader: psycopg.Connection) -> None:
+    result = run_query(reader, "SELECT age(date '2025-12-15', date '2006-12-21') AS age")
+
+    assert result.rows == [("18 years 11 mons 25 days",)]

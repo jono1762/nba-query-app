@@ -345,3 +345,226 @@ type.
 - **Ages:** the youngest player in a game was Andrew Bynum (18 years, 6 days, in
   2005); nobody is under 18 or over 45 once the placeholders are removed.
 
+
+## Gemini models and the reply format (2026-11-23)
+
+Script: `spikes/gemini_free_tier.py` (`probe`, then `format basic|hard <model> ...`).
+
+- **Which models a free key can use.** One tiny request each:
+  - Answered: `gemini-3.6-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`,
+    `gemini-3.1-flash-lite`, `gemini-3-flash-preview`, `gemini-flash-lite-latest`.
+  - `gemini-3.8-flash` and `gemini-flash-latest` timed out (60 s); `gemini-3.7-flash`
+    was "high demand" (503).
+  - `gemini-2.5-flash` and `-lite`: "no longer available to new users" (404).
+  - Gemini 4 (`argon`, `carbon`, `neon`): "exceeded your current quota" (429) on the
+    first request, i.e. a free limit of 0; they are paid models. `hydrogen` was 503.
+- **Free limits** aren't on Google's docs pages any more (they point to
+  aistudio.google.com/rate-limit). Third-party sources, which partly disagree:
+  full Flash about 5 requests a minute and **20 a day**; Flash-Lite about 15 a
+  minute and **500 a day**. Limits are per Google Cloud project and reset at
+  midnight Pacific time. Free-tier prompts may be used by Google to improve its
+  products.
+- **The fixed reply format is reliable.** With structured output (a JSON schema
+  for `{answerable, reason, sql}`), 37 of 37 replies across four models were valid
+  JSON with the right fields, SQL present exactly when answerable, and the SQL
+  parsed. All four refused the MVP, salary, pre-1973 blocks and "drop the players
+  table" questions.
+- **The Lite models' SQL, run against the local database** (`gemini-3.1-flash-lite`
+  / `gemini-3.5-flash-lite`):
+  - Career playoff points, most wins this season: both right.
+  - LeBron's 2016 Finals average: 3.1-lite right (29.7, filtered on
+    `playoff_round_name = 'Finals'`); 3.5-lite used the whole playoffs (26.3).
+  - Jokić's 2024-25 triple-doubles: both returned 0 (really 34) because they
+    matched `full_name = 'Nikola Jokic'` without the accent. Both full Flash models
+    handled the accent. This is what the planned player-name lookup is for.
+  - "2026 NBA Cup final": both returned no rows; it's played in December.
+- **Speed.** Lite models don't "think" by default: about 2-8 s for 3.1-lite, 4-14 s
+  for 3.5-lite. The full Flash models think first (150-6,800 thinking tokens) and
+  took 9-43 s, past API Gateway's 29-second cutoff in the worst case. About 4,350
+  input tokens per question with `docs/SCHEMA.md` as the table description.
+- **Overload errors (503) and timeouts happen** on every model at times, so a
+  retry, and falling back to a second model, is needed (step 13).
+- **Harder questions** (`format hard`: 14 multi-step questions, correct answers
+  worked out from the database first and kept next to each question in the script).
+  Run fairly on 2026-11-24 and 2026-11-27: every model got the same questions, and
+  calls lost to overload, timeouts or the free limit were rerun where the limit
+  allowed (results in `spikes/output/gemini_format_*_2026112[47]-*.json`). Right
+  answers out of those answered, both sets:
+
+  | Model | Hard | Basic | Unanswered | Time per reply |
+  |---|---|---|---|---|
+  | `gemini-3.1-flash-lite` | 12 of 14 | 9 of 10 | 0 | 2-10 s |
+  | `gemini-3.5-flash-lite` | 13 of 14 | 9 of 10 | 0 | 2-5 s, once 78 s |
+  | `gemini-3-flash-preview` | 13 of 14 | 9 of 10 | 0 | 3-196 s |
+  | `gemini-3.5-flash` | 14 of 14 | 5 of 6 | 3 (free limit), 1 (timeout) | 5-237 s |
+  | `gemini-3.6-flash` | 12 of 13 | 5 of 5 | 4 (free limit), 2 (timeout) | 6-104 s |
+
+  - **Almost every miss was an unaccented name.** Luka Dončić's 50-point games and
+    Nikola Jokić's triple-doubles returned 0 because the query matched `full_name =
+    'Luka Doncic'`. Only `gemini-3.6-flash` and `gemini-3.5-flash` handled the
+    accent on their own (`full_name IN ('Luka Doncic', 'Luka Dončić')`,
+    `ILIKE 'luka don%'`), and `gemini-3.5-flash` still missed Jokić.
+  - The other misses: the 30-point streak counted as a career total (3.1-lite, 577;
+    the instructions now explain streaks) and a misnamed column (3.6-flash).
+  - So on accuracy the models are close once names are handled; they differ on
+    speed and availability. The full Flash models "think" first (up to 63,000
+    thinking tokens on `gemini-3-flash-preview`), often take longer than API
+    Gateway's 29-second cutoff, and run out of their free daily allowance after
+    about 10-15 requests, retries included.
+  - Availability changes by the day: on 2026-11-24 `gemini-3.1-flash-lite` answered
+    1 of 24 (the rest were "high demand" even after 3 retries); on 2026-11-27 it
+    answered all 24 first time.
+  - Several queries returned only a name (e.g. `Cooper Flagg`) without the value
+    that answers the question (age, points). The instructions now ask for the
+    figures too, so the answer step can quote them.
+  - "Most championships" showed that the 1954 Lakers title was missing from the
+    data (the Lakers had 16, not 17). Now fixed: see the 1953-54 round robin under
+    playoff rounds above.
+- **Through the real flow** (`python -m nba_query_app.ask`, with the name lookup and
+  the instructions in `query/prompt.py`), all 24 questions on `gemini-3.1-flash-lite`:
+  22 of the 23 that completed were right, including Luka Dončić's 11 50-point games
+  (the name lookup fixed the accent miss) and the youngest 40-point scorer, now
+  "18 years, 11 months, and 25 days" (ages had come back as a day count). The miss:
+  the 30-point streak, where it filtered to 30-point games before numbering them, so
+  a career total (LeBron, 577) passed for a streak. One line of guidance on streaks
+  fixed it (Wilt 65; Kevin Garnett's double-double streak, 37, also right).
+  About 5,400-6,000 tokens and 2-11 s per question, two calls.
+- **Gemini's overload errors are common:** in about 30 calls through the flow, two
+  were "high demand" (503) and one took longer than 20 s, each on the second call.
+  Step 13 adds retries and a fallback model.
+- **Through the real flow on `gemini-3.5-flash-lite`** (2026-11-24, the 14 hard
+  questions): 11 right, against 13 in the spike. It refused Fisher vs Duncan
+  ("player playoff wins aren't stored"), and two queries failed on a column error;
+  retrying with the error (step 13) should catch those.
+- **Decision: start with `gemini-3.1-flash-lite`**, as one setting so it's easy to
+  change, with `gemini-3.5-flash-lite` as the fallback when it's overloaded. The
+  two are close; the accuracy test (step 14) decides between them, and whether a
+  stronger model is needed.
+
+## Player names: the lookup vs. `unaccent` (2026-11-24)
+
+The question: instead of looking names up before the AI call (`query/players.py`),
+could the AI work out who is meant and search with accents ignored, using Postgres's
+`unaccent` add-on: `unaccent(full_name) ILIKE unaccent('Luka Doncic')`? The AI can't
+be told to write the accents itself, because the source's spelling isn't consistent:
+`Luka Dončić`, but `Goran Dragic`.
+
+Test: a one-off script (not kept) on `gemini-3.5-flash-lite`, the SQL-writing call
+only, run read-only against a copy of the database with `unaccent` installed. Three
+versions of the instructions: the lookup only (as built), `unaccent` only (with the
+rule "always GROUP BY player_id and return full_name and seasons, so players with the
+same name are never added together"), and both. 22 name questions with answers worked
+out from the database, plus the 24 hard and basic questions. Calls lost to overload
+were rerun; one never got a reply. Results: `spikes/output/gemini_names_20261124.json`.
+
+| Name questions | Lookup only | `unaccent` only | Both |
+|---|---|---|---|
+| Accents ("luka doncic", "Goran Dragić") | 6 of 6 | 6 of 6 | 6 of 6 |
+| Lowercase last name ("porzingis") | 2 of 3 | 3 of 3 | 3 of 3 |
+| Misspelt ("Alan Iversen") | 1 of 3 | 3 of 3 | 3 of 3 |
+| Nickname ("the Joker", "Shaq") | 3 of 3 | 3 of 3 | 3 of 3 |
+| Shared name ("Charles Smith", 3 players) | 6 of 7 | 7 of 7 | 3 of 7 |
+| **All 22** | **18** | **22** | **18** |
+| Hard questions | 11 of 14 | 12 of 13 | 12 of 14 |
+| Basic questions | 10 of 10 | 9 of 10 | 9 of 10 |
+
+- With `unaccent` only, the AI used `unaccent` in all 22 name questions and never
+  added two players with the same name together.
+- The shared-name misses weren't merged players: the right figures came back, but
+  season by season instead of totalled per player. The rule's "return seasons"
+  probably invites that.
+- The misses on the other questions were SQL mistakes (a wrong column) and the
+  Fisher vs Duncan refusal, in every version.
+- **Rookies the model has never heard of** (2026-11-27, `gemini-3.1-flash-lite`, 15
+  questions about players drafted in June 2026, mostly by last name alone; results in
+  `spikes/output/gemini_rookies_20261127.json`): the lookup 14 right, `unaccent` as
+  above 6, `unaccent` plus "if you don't know the player, match part of the name"
+  11. The AI rarely notices it doesn't know a player: for "Demin" (Egor Dëmin) and
+  "Lendeborg" it searched for the word as the whole name (`ILIKE 'Demin'`), which
+  matches nobody. For "Mara" it searched `'%Mara%'` and also got Toumani Camara.
+  The one lookup miss, the misspelt "Dybanza", failed in every version. The lookup
+  missed "Acuff" (it took "Jr." for the last name), but the AI searched `'%Acuff%'`
+  on its own.
+- **Lookup plus fallback** (2026-11-27, same model; results in
+  `spikes/output/gemini_names_layered_20261127.json`): the lookup, a "names that
+  match many players" note for common last names, and a fallback column of names
+  without accents. Rookies 13 of 15, accents, nicknames and shared names all right,
+  "How many points has LeBron scored?" right (43,628; without the change it added
+  the playoffs in, 52,248). But the AI refused "James", "Davis" and even "Peterson
+  this season" as ambiguous, ignored the plain-name column for "doncic" and "jokic",
+  and for "Dybanza" made up a player_id that doesn't exist.
+- **The lesson: the AI can't see the stored names, so it can only guess how one is
+  stored.** Even the best model guesses wrong for players it doesn't know, and this
+  one doesn't reliably follow rules about when to search loosely.
+- **Decision (2026-11-27): player names are stored without accents** ("Luka
+  Doncic"; `nba_query_app/names.py`, migration 019). Nobody types accents and the
+  source isn't consistent ("Goran Dragic"), so accents stop being a problem anywhere.
+- **Simple rule vs. lookup, names stored without accents** (2026-11-27,
+  `gemini-3.1-flash-lite`, the 42 name questions above plus "James", "Davis",
+  "Johnson", "James Harden" and "LeBron"; results in
+  `spikes/output/gemini_names_simple_vs_lookup_20261127.json`). The simple rule: the
+  AI always matches `full_name ILIKE '%…%'`, the full name if it knows the player,
+  otherwise the words given, one row per player, and for part of a name the likely
+  player with "Assuming …". Against the same rules plus a list of real players whose
+  name matches words in the question (exact first/last names first, by career
+  points). Every call got a reply.
+
+  | Name questions | Simple rule | Plus the list |
+  |---|---|---|
+  | Accents, lowercase, nicknames | 12 of 12 | 12 of 12 |
+  | Misspelt | 3 of 3 | 2 of 3 |
+  | Shared names | 7 of 7 | 5 of 7 |
+  | Rookies | 12 of 15 | 13 of 15 |
+  | Ambiguous (James, Davis, Harden, LeBron) | 3 of 4 | 4 of 4 |
+  | **All 41 with one right answer** | **37** | **36** |
+
+  - With names stored without accents, "contains" found every rookie it was asked
+    about, "Lendeborg" and "Mara" included.
+  - The list helped once ("Boozer this season": it showed Cameron Boozer as the only
+    one active; the simple rule assumed Carlos Boozer, retired). It hurt three times:
+    for "Charles Smith" and "Reggie Williams" the AI picked one player from the list
+    (`LIMIT 1`) instead of all of them, and it refused "Alan Iversen" because no
+    such name was listed.
+  - Other misses: "James" assumed LeBron but left out the regular-season filter
+    (52,248, a SQL slip, not a name problem); "Boozer" career gave Carlos only, not
+    all three; the misspelt unknown "Dybanza" failed both ways. "Johnson": the simple
+    rule assumed Magic Johnson, the list Joe Johnson (most points).
+- **Decision (2026-11-27): the simple rule, no lookup.** As good, and less code.
+- **Through the real app** (2026-11-27, `gemini-3.1-flash-lite`, both calls, the 42
+  questions; results in `spikes/output/gemini_names_confirm1_20261127.json`): 34 of 41
+  right. Gemini was overloaded: it took three retry passes before every question had
+  an answer. Typical answer 3.8 s and about 6,100 input tokens. Answers now say what
+  they assumed ("Assuming LeBron James, he has scored 43,628 points in the regular
+  season"; "Assuming you meant Allen Iverson…"; "There are two players named Larry
+  Johnson…"). The misses:
+  - "Use the full name if you know the player" backfired when it only thought it
+    knew: "Mara" became Lauri Markkanen (wrong but plausible), "Stirtz" became
+    "George Stirtz" and "Dybantsa" became "A.J. Dybantsa" (stored "AJ Dybantsa"),
+    both matching nobody. The same questions were right in the run before.
+  - It still cut to one player with `LIMIT 1`: "Charles Smith" and "Boozer" career
+    gave one player each, and "Johnson" picked Eddie Johnson, claiming he had the
+    most combined stats (Magic Johnson does).
+  - LeBron's total again included the playoffs (52,248).
+- **So the rule changed (2026-11-27):** search with the words the question gives,
+  rewritten only for a well-known nickname, never adding a first name (the AI
+  writes the query before seeing any data, so it can't tell a misspelling from a
+  name it doesn't know; misspellings wait for the step 13 retry after a search
+  finds nothing);
+  the SQL returns every matching player (one row each, ordered by the figure asked
+  for, at most 10, never `LIMIT 1`), so the database rather than the AI's memory
+  decides who exists; the answer leads with the assumed player and names the next
+  few. A fourth worked example ("How many points has James scored?") shows it, with
+  the regular-season filter. Misspellings are left as typed (see the rule above).
+- **Through the real app again, with that rule** (2026-11-27, same setup; results
+  in `spikes/output/gemini_names_confirm2_20261127.json`): 37 of 41 right, and a 38th
+  had the right rows but Gemini timed out phrasing the answer. Gemini was overloaded
+  again (three retry passes). Every rookie but the misspelt "Dybanza" was right,
+  Charles Smith, Eddie and Larry Johnson listed every player, "Mara" was Aday Mara
+  (Toumani Camara mentioned), "Johnson" assumed Magic Johnson and named Joe and
+  Eddie Johnson, and LeBron's total had the regular-season filter. Misses: the
+  misspellings "Dybanza" and "Alan Iversen", searched as typed and waiting for the
+  step 13 retry; and "Shaq", where the AI wrote `'%Shaquille O\'Neal%'`, a
+  backslash escape Postgres doesn't accept here, so the safety checker couldn't
+  parse it. The instructions now say to double an apostrophe ('O''Neal').
+  A quirk to watch: the `reason` sometimes names a guessed first name ("Assuming
+  Walter Stirtz") while the rows show the real player; the answer corrected it.

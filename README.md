@@ -16,6 +16,10 @@ cp .env.example .env         # local settings (git-ignored)
 docker compose up -d         # start local Postgres on localhost:5432
 uv run --env-file .env python -m nba_query_app.db.migrate   # create/update tables
 
+# once: the read-only login AI-written SQL runs as (READER_DATABASE_URL in .env)
+docker compose exec db psql -U nba -c \
+  "CREATE ROLE nba_app_reader LOGIN PASSWORD 'reader_local_dev' IN ROLE nba_reader"
+
 uv run ruff check .                  # lint
 uv run ruff format .                 # auto-format
 uv run --env-file .env pytest        # all tests (database tests need Postgres running)
@@ -42,6 +46,19 @@ After that only new players are looked up, and an interrupted run picks up where
 The data-quality report flags impossible or suspicious data
 (e.g. a team whose player minutes don't add up) for a person to look at; it never
 blocks a load.
+
+## Asking questions
+
+From the command line, against the real AI and the local database. Needs
+`GEMINI_API_KEY` and `READER_DATABASE_URL` in `.env`. Each question uses up to two
+AI calls from the Gemini free allowance.
+
+```bash
+uv run --env-file .env python -m nba_query_app.ask "Who scored the most points in 2025-26?"
+```
+
+It prints the answer, then the SQL the AI wrote, the result rows, and the AI calls
+and tokens used.
 
 ## Database
 
@@ -72,7 +89,11 @@ blocks a load.
 ```
 src/nba_query_app/   application code (db/: migrations runner, ingest/: NBA data loading,
                      quality.py: data-quality checks,
-                     query/: SQL safety checker and read-only query runner)
+                     names.py: player names stored without accents,
+                     query/: SQL safety checker, read-only query runner, the AI's
+                     instructions and the question-answering flow,
+                     llm/: AI model interface and Gemini client,
+                     ask.py: ask a question from the command line)
 migrations/          database schema changes (numbered SQL files)
 tests/               automated tests
 docs/PLAN.md         the build plan, decisions and progress

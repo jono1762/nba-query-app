@@ -32,8 +32,8 @@ Decisions:
 | 9 | Playoff rounds and series (who won each round, champions) | Done, see `spikes/FINDINGS.md` |
 | 10 | Player details (position, height, birth date, draft), then `docs/SCHEMA.md` | Done, see `docs/SCHEMA.md` and `spikes/FINDINGS.md` |
 | 11 | SQL safety checker | Done |
-| 12 | Connect Gemini (command-line first) | Next |
-| 13 | Retries, refusals, cost logging | |
+| 12 | Connect Gemini (command-line first) | Done: `python -m nba_query_app.ask`, see `spikes/FINDINGS.md` |
+| 13 | Retries, refusals, cost logging | Next |
 | 14 | Accuracy test | |
 | 15 | Web API, plus `docs/ARCHITECTURE.md` | |
 | 16 | Webpage | |
@@ -167,11 +167,21 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 - Decided: the SQL runs exactly as the AI wrote it, which is also what "Show SQL" will display. (The checking library can rewrite SQL, but it renames some functions, so rewritten SQL could behave differently.)
 
 **12. Connect Gemini.** First test which model is free, its limits, and whether the fixed reply format is reliable (needs the API key). Then build the AI instructions and call Gemini, with a command-line version first.
+- Decided: start with the cheapest model that does the job, **`gemini-3.1-flash-lite`** (free: about 500 requests a day, replies in 2-8 seconds), and move up only if the accuracy test shows it isn't good enough. The full Flash models allow only about 20 requests a day on the free tier and take 9-43 seconds, and the Gemini 4 models aren't free at all. Details in `spikes/FINDINGS.md`.
+- Decided: Gemini's "structured output" (a JSON format the reply must follow) gives the fixed reply format; every test reply came back valid.
+- Decided: the AI is told about the tables from the database's own column descriptions (read when the app starts), so they can't drift from the real tables, plus hand-written rules, basketball definitions and four worked examples, and when each stat was first recorded.
+- Decided: player names are stored without accents ("Luka Doncic", not "Luka Dončić"): nobody types them, and the source isn't consistent anyway ("Goran Dragic"). Before this, most models tested searched for "Luka Doncic" and found nothing.
+- Decided: the AI matches player names itself with "contains" (`full_name ILIKE '%…%'`), using the words the question gives and rewriting them only for a well-known nickname, so it can't swap in a name it half-remembers. It writes the query before seeing any data, so it can't tell a misspelling from a name it doesn't know: misspellings are left to the step 13 retry, which sends a name search that found nothing back to the AI. The SQL returns every matching player, one row each, so players who share a name are never added together and the database, not the AI's memory, decides who exists. For part of a name ("James") the AI says which player it assumes (one active in the season asked about, otherwise the best known), and the answer leads with him and names the next few; it never refuses because a name is ambiguous, since each question is one request with no follow-up. No player ID numbers in the SQL, so it can't make one up. Looking names up in our own code first did no better in testing, so it was removed (`spikes/FINDINGS.md`).
 - **Base case:** the AI writes the SQL, our code safety-checks and runs it, and a second AI call phrases the answer from the result rows (see "What happens when someone asks a question").
 - Build it behind a small interface (question in, answer, rows, SQL and usage out), so a different strategy can replace it without touching the rest.
 - **Not now: an "agent" loop**, where the AI gets a `run_sql` tool and can query several times before answering. It handles multi-step questions better, but multiplies AI calls on a free tier that's already the tightest limit. Revisit only if the accuracy test shows the base case failing on multi-step questions; the interface above makes it a drop-in change (capped at about 4 tool calls and 20 seconds, since API Gateway cuts requests off at 29 seconds).
 
-**13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost. Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+**13. Retries, refusals, cost logging.** Retry on errors, refuse when needed, log token usage and cost.
+- Gemini often answers "high demand" (503) or doesn't reply in time, on every model (about 1 call in 10 in testing), so retry with a short wait and fall back to a second free model (`gemini-3.5-flash-lite`).
+- Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
+- Player names: a name search that finds nothing goes back to the AI once ("no player matched 'Iversen'; if it's misspelt, use the real name"), so misspellings are corrected only after the name as typed has been shown to match nobody. One extra call, only on a miss.
+- Strip accents from the question in our code before it goes to the AI (`strip_accents`), so "Dončić" always arrives as "Doncic", matching the stored names, instead of relying on the AI to remember that names have no accents.
+- "Today" in the prompt uses US Eastern time, the NBA's calendar, not the clock of whatever runs the app (Perth on the laptop, UTC on AWS), and the instructions say game dates are US dates. Stored game dates stay as NBA.com gives them (the day the game was played in the US), since every stats site uses those. Check that AWS Lambda has the time-zone data (`zoneinfo`; add the `tzdata` package if not).
 
 **14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
@@ -183,9 +193,11 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 **15. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
 - Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
-**16. Webpage.** A question box, example questions, the plain-English answer with the results table under it, a "Show SQL" button, and friendly messages for refusals and limits.
+**16. Webpage.** A question box, example questions, the plain-English answer with the results table under it, a "Show SQL" button, and friendly messages for refusals and limits. A note that dates are US dates, and "data up to <newest game>" from `meta.latest_game_date`.
 
-**17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
+**17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it.
+- Before copying, rebuild the data from scratch into a new, empty local database (full backfill, about 10 minutes, and player details, about 2 hours for birth dates), run the data-quality report, and compare it with the current database (row counts per season, career totals, champions). That proves the current code alone produces the data, since the current database was built up in stages as the code changed, and it picks up any corrections NBA.com made to old box scores. The fresh database is the one copied to Neon.
+- Schedule the daily update (on the home machine) for mid-afternoon Perth time, after the last US games have finished. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
 
 **18. Automatic deploys** whenever code is merged to `main`.
 
