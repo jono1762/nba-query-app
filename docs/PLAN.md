@@ -180,6 +180,7 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 - Gemini often answers "high demand" (503) or doesn't reply in time, on every model (about 1 call in 10 in testing), so retry with a short wait and fall back to a second free model (`gemini-3.5-flash-lite`).
 - Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
 - Player names: a name search that finds nothing goes back to the AI once ("no player matched 'Iversen'; if it's misspelt, use the real name"), so misspellings are corrected only after the name as typed has been shown to match nobody. One extra call, only on a miss.
+- "Today" in the prompt uses US Eastern time, the NBA's calendar, not the clock of whatever runs the app (Perth on the laptop, UTC on AWS), and the instructions say game dates are US dates. Stored game dates stay as NBA.com gives them (the day the game was played in the US), since every stats site uses those. Check that AWS Lambda has the time-zone data (`zoneinfo`; add the `tzdata` package if not).
 
 **14. Accuracy test.**
 - About 30 questions with known correct answers, plus about 6 the app *should refuse* (including stats asked about before they were recorded).
@@ -191,9 +192,11 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 **15. Web API.** The `/api/ask` endpoint with rate limiting, caching, and clear error messages. Its tests use a fake AI.
 - Also write `docs/ARCHITECTURE.md` now that a question can travel the whole path. It covers the request flow, the safety layers, the data source, and the key decisions and why. Then trim `CLAUDE.md`'s Architecture section to a pointer plus code-level details. (Deferred until here so it describes the real system, not the plan.)
 
-**16. Webpage.** A question box, example questions, the plain-English answer with the results table under it, a "Show SQL" button, and friendly messages for refusals and limits.
+**16. Webpage.** A question box, example questions, the plain-English answer with the results table under it, a "Show SQL" button, and friendly messages for refusals and limits. A note that dates are US dates, and "data up to <newest game>" from `meta.latest_game_date`.
 
-**17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
+**17. Neon setup and first AWS deploy.** Test the Neon connection and its wake-up delay, check the real free storage limit, and copy the local data to it.
+- Before copying, rebuild the data from scratch into a new, empty local database (full backfill, about 10 minutes, and player details, about 2 hours for birth dates), run the data-quality report, and compare it with the current database (row counts per season, career totals, champions). That proves the current code alone produces the data, since the current database was built up in stages as the code changed, and it picks up any corrections NBA.com made to old box scores. The fresh database is the one copied to Neon.
+- Schedule the daily update (on the home machine) for mid-afternoon Perth time, after the last US games have finished. Add the SAM config for the AWS pieces and a **billing alert at $1**. The first deploy is by hand.
 
 **18. Automatic deploys** whenever code is merged to `main`.
 
