@@ -180,6 +180,7 @@ So each question takes two AI calls: write the SQL, then phrase the answer (plus
 - Gemini often answers "high demand" (503) or doesn't reply in time, on every model (about 1 call in 10 in testing), so retry with a short wait and fall back to a second free model (`gemini-3.5-flash-lite`).
 - Refuse questions about stats before they were recorded ("blocks weren't tracked in 1962"), and add a caveat to totals that span the gap ("blocks counted from 1973-74").
 - Player names: a name search that finds nothing goes back to the AI once ("no player matched 'Iversen'; if it's misspelt, use the real name"), so misspellings are corrected only after the name as typed has been shown to match nobody. One extra call, only on a miss.
+- Strip accents from the question in our code before it goes to the AI (`strip_accents`), so "Dončić" always arrives as "Doncic", matching the stored names, instead of relying on the AI to remember that names have no accents.
 - "Today" in the prompt uses US Eastern time, the NBA's calendar, not the clock of whatever runs the app (Perth on the laptop, UTC on AWS), and the instructions say game dates are US dates. Stored game dates stay as NBA.com gives them (the day the game was played in the US), since every stats site uses those. Check that AWS Lambda has the time-zone data (`zoneinfo`; add the `tzdata` package if not).
 
 **14. Accuracy test.**
